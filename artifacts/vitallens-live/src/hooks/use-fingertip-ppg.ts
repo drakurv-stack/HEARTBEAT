@@ -70,6 +70,7 @@ export function useFingertipPpg() {
   const [variability, setVariability] = useState<PpgVariabilityEstimate | null>(null);
   const [torchStatus, setTorchStatus] = useState<PpgTorchStatus>('idle');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [cleanSignalSeconds, setCleanSignalSeconds] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [samples, setSamples] = useState<PpgSample[]>([]);
   const [sampleCount, setSampleCount] = useState(0);
@@ -95,6 +96,8 @@ export function useFingertipPpg() {
   const reportReadingsRef = useRef<MeasurementReportReading[]>([]);
   const reportSignalQualityRef = useRef<number[]>([]);
   const lastReportReadingAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const cleanSignalSecondsRef = useRef(0);
+  const lastSignalQualityAtRef = useRef(0);
 
   const videoRef = useCallback((node: HTMLVideoElement | null) => {
     videoElementRef.current = node;
@@ -213,6 +216,7 @@ export function useFingertipPpg() {
     setVariability(null);
     setTorchStatus('checking');
     setElapsedSeconds(0);
+    setCleanSignalSeconds(0);
     setSamples([]);
     setSampleCount(0);
     setMarkers([]);
@@ -230,6 +234,8 @@ export function useFingertipPpg() {
     reportReadingsRef.current = [];
     reportSignalQualityRef.current = [];
     lastReportReadingAtRef.current = Number.NEGATIVE_INFINITY;
+    cleanSignalSecondsRef.current = 0;
+    lastSignalQualityAtRef.current = 0;
 
     let stream: MediaStream | null = null;
     try {
@@ -387,6 +393,19 @@ export function useFingertipPpg() {
         const elapsed = (performance.now() - startedAtRef.current) / 1000;
         const estimate: PpgEstimate = estimatePpgHeartRate(signalWindowRef.current);
         const variabilityEstimate = estimatePpgVariability(signalWindowRef.current);
+        const evaluatedAt = performance.now();
+        if (estimate.bpm !== null && lastSignalQualityAtRef.current > 0) {
+          const elapsedSinceEvaluation = Math.min(
+            0.5,
+            Math.max(0, (evaluatedAt - lastSignalQualityAtRef.current) / 1000),
+          );
+          cleanSignalSecondsRef.current = Math.min(
+            60,
+            cleanSignalSecondsRef.current + elapsedSinceEvaluation,
+          );
+          setCleanSignalSeconds(cleanSignalSecondsRef.current);
+        }
+        lastSignalQualityAtRef.current = evaluatedAt;
         setVariability(variabilityEstimate);
         setElapsedSeconds(elapsed);
         setSignalQuality(estimate.quality);
@@ -558,6 +577,7 @@ export function useFingertipPpg() {
     variability,
     torchStatus,
     elapsedSeconds,
+    cleanSignalSeconds,
     errorMessage,
     samples,
     sampleCount,

@@ -26,6 +26,7 @@ export interface PpgModeProps {
   variability: PpgVariabilityEstimate | null;
   torchStatus: PpgTorchStatus;
   elapsedSeconds: number;
+  cleanSignalSeconds: number;
   errorMessage: string | null;
   samples: readonly PpgSample[];
   sampleCount: number;

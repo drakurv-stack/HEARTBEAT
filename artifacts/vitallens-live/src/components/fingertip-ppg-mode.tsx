@@ -92,6 +92,7 @@ export function FingertipPpgMode({
   variability,
   torchStatus,
   elapsedSeconds,
+  cleanSignalSeconds,
   errorMessage,
   samples,
   sampleCount,
@@ -130,7 +131,18 @@ export function FingertipPpgMode({
     variability.pnn50Percent !== null &&
     variability.meanPpiMs !== null,
   );
-  const variabilityProgress = Math.min(60, variability?.windowSeconds ?? 0);
+  const variabilityProgress = Math.min(60, cleanSignalSeconds);
+  const signalGuidance = lowGreenSignal
+    ? torchStatus === 'unsupported' || torchStatus === 'unavailable'
+      ? 'The camera image is almost black, and this browser could not enable the rear flash. Finger PPG needs enough light through the fingertip; try a phone browser that supports the camera torch, then cover the rear lens and flash.'
+      : 'Very little green light is reaching the camera. Make sure the rear flash is on, place your fingertip over both the lens and flash, and keep it still with light pressure.'
+    : active && qualityPercent !== null && qualityPercent < 30
+      ? 'No clear pulse yet. Cover the rear camera lens and flash completely with your fingertip, and hold the phone and finger still.'
+      : active && qualityPercent === null
+        ? 'Place your fingertip over both the rear camera lens and flash, then hold still while the signal settles.'
+        : qualityPercent !== null && qualityPercent >= 75
+          ? 'Good contact. Keep your finger relaxed and still.'
+          : 'Use light, steady pressure. Avoid pressing hard or shifting.';
   const torchLabel = {
     idle: 'Start a session to check support',
     checking: 'Checking torch support',
@@ -215,13 +227,7 @@ export function FingertipPpgMode({
           <div className="ppg-quality">
             <div className="ppg-quality-head"><span>SIGNAL QUALITY</span><strong data-testid="metric-ppg-signal-quality">{qualityPercent === null ? '—' : `${qualityPercent}%`} <i>{qualityLabel}</i></strong></div>
             <div className="ppg-quality-track" role="meter" aria-label="Signal quality" aria-valuemin={0} aria-valuemax={100} aria-valuenow={qualityPercent ?? 0}><span style={{ width: `${qualityPercent ?? 0}%` }} /></div>
-            <p>{lowGreenSignal
-              ? torchStatus === 'unsupported' || torchStatus === 'unavailable'
-                ? 'The camera image is almost black, and this browser could not enable the rear flash. Finger PPG needs enough light through the fingertip; try a phone browser that supports the camera torch, then cover the rear lens and flash.'
-                : 'Very little green light is reaching the camera. Make sure the rear flash is on, place your fingertip over both the lens and flash, and keep it still with light pressure.'
-              : qualityPercent !== null && qualityPercent >= 75
-                ? 'Good contact. Keep your finger relaxed and still.'
-                : 'Use light, steady pressure. Avoid pressing hard or shifting.'}</p>
+            <p>{signalGuidance}</p>
           </div>
 
           <section className="ppg-variability" aria-label="Pulse interval variability" data-testid="ppg-variability">
