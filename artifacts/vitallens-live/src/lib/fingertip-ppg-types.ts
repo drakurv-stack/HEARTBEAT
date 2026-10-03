@@ -2,7 +2,7 @@ import type { PpgVariabilityEstimate } from './fingertip-ppg-signal';
 
 export type PpgModePhase = 'idle' | 'starting' | 'warming' | 'live' | 'error';
 
-export type PpgTorchStatus = 'idle' | 'checking' | 'on' | 'unsupported' | 'unavailable';
+export type PpgTorchStatus = 'idle' | 'checking' | 'on' | 'off' | 'unsupported' | 'unavailable';
 
 export type PpgBreathingEvent = 'inhale' | 'exhale';
 

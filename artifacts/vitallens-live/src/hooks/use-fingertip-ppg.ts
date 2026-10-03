@@ -21,6 +21,7 @@ const FILTER_ALPHA = 0.72;
 const SIGNAL_WINDOW_SECONDS = 75;
 const PUBLISH_INTERVAL_MS = 250;
 const DISPLAY_SAMPLE_LIMIT = 180;
+const NO_SIGNAL_TIMEOUT_SECONDS = 20;
 
 type TorchCapabilities = MediaTrackCapabilities & { torch?: boolean };
 
@@ -197,6 +198,7 @@ export function useFingertipPpg() {
     }
     releaseCamera();
     setCameraActive(false);
+    setTorchStatus('off');
     setPhase('idle');
     setErrorMessage(null);
     startedAtRef.current = 0;
@@ -379,6 +381,7 @@ export function useFingertipPpg() {
           publishFinalState();
           releaseCamera();
           setCameraActive(false);
+          setTorchStatus('off');
           setPhase('error');
           setErrorMessage('The camera signal could not be read locally. Restart the measurement and try again.');
           return;
@@ -419,6 +422,20 @@ export function useFingertipPpg() {
           latestGoodEstimateAtRef.current = performance.now();
           setBpm(median(history));
           setPhase('live');
+        } else if (
+          latestGoodEstimateAtRef.current === 0 &&
+          elapsed >= NO_SIGNAL_TIMEOUT_SECONDS
+        ) {
+          runTokenRef.current += 1;
+          publishFinalState();
+          releaseCamera();
+          setCameraActive(false);
+          setTorchStatus('off');
+          setPhase('error');
+          setErrorMessage(
+            'No clean pulse was detected within 20 seconds, so the camera and flash were stopped to limit heating. Let the phone cool, then cover the rear lens and flash with your fingertip before trying again.',
+          );
+          return;
         } else if (performance.now() - latestGoodEstimateAtRef.current > 2500) {
           setBpm(null);
           setPhase('warming');
@@ -457,6 +474,7 @@ export function useFingertipPpg() {
         publishFinalState();
         releaseCamera();
         setCameraActive(false);
+        setTorchStatus('off');
         setPhase('error');
         setErrorMessage('The camera stopped unexpectedly. Start a new measurement to continue.');
       }, { once: true });
@@ -474,7 +492,7 @@ export function useFingertipPpg() {
         stream.getTracks().forEach((track) => track.stop());
       }
       setCameraActive(false);
-      setTorchStatus('unavailable');
+      setTorchStatus('off');
       setPhase('error');
       setErrorMessage(describeCameraError(error));
     }

@@ -147,6 +147,7 @@ export function FingertipPpgMode({
     idle: 'Start a session to check support',
     checking: 'Checking torch support',
     on: 'Torch on',
+    off: 'Torch off',
     unsupported: 'Torch not supported',
     unavailable: 'Torch unavailable',
   }[torchStatus];
@@ -168,7 +169,7 @@ export function FingertipPpgMode({
             <p className="ppg-overline">A quieter way to explore your pulse</p>
             <h1>Pulse, in the<br className="ppg-title-break" /> palm of your hand<span>.</span></h1>
           </div>
-          <p className="ppg-intro-copy">Cover the rear camera lens and flash with a relaxed fingertip. The browser follows green-channel light changes locally; flash support depends on your device.</p>
+        <p className="ppg-intro-copy">Cover the rear camera lens and flash with a relaxed fingertip. The browser follows green-channel light changes locally; flash support depends on your device. Stop if the phone or flash feels hot.</p>
         </div>
         <div className="ppg-mode-switch" aria-label="Camera modes">
           <Link href="/" className="ppg-mode-link" data-testid="link-mode-face-camera">Face camera</Link>
@@ -274,7 +275,7 @@ export function FingertipPpgMode({
 
       <section className="ppg-guidance">
         <div className="ppg-guidance-icon"><Info size={17} /></div>
-        <div><strong>Explore gently. This is wellness-only.</strong><p>Camera pulse estimates can be affected by movement, lighting, temperature, and fit. They are for general wellness exploration only—not medical advice, diagnosis, or a substitute for care.</p></div>
+        <div><strong>Explore gently. This is wellness-only.</strong><p>Camera pulse estimates can be affected by movement, lighting, temperature, and fit. Stop if the phone or flash feels hot; heart rate may appear before the optional 60-second variability window. These estimates are for general wellness exploration only—not medical advice, diagnosis, or a substitute for care.</p></div>
         <div className="ppg-guidance-check"><Check size={14} /> No account. No frame upload.</div>
       </section>
 
