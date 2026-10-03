@@ -77,9 +77,15 @@ export function useFingertipPpg() {
   const [sampleCount, setSampleCount] = useState(0);
   const [markers, setMarkers] = useState<PpgBreathingMarker[]>([]);
   const [report, setReport] = useState<MeasurementReportData | null>(null);
+  const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
+  const [recordedVideoName, setRecordedVideoName] = useState<string | null>(null);
+  const [videoRecordingActive, setVideoRecordingActive] = useState(false);
+  const [videoRecordingError, setVideoRecordingError] = useState<string | null>(null);
 
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const videoChunksRef = useRef<Blob[]>([]);
   const cameraActiveRef = useRef(false);
   const runTokenRef = useRef(0);
   const startedAtRef = useRef(0);
@@ -129,6 +135,16 @@ export function useFingertipPpg() {
       publishTimerRef.current = null;
     }
 
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop();
+      } catch {
+        // The recorder may already be stopping as the camera track ends.
+      }
+    }
+    mediaRecorderRef.current = null;
+
     const stream = streamRef.current;
     if (stream) {
       for (const track of stream.getVideoTracks()) {
@@ -163,6 +179,10 @@ export function useFingertipPpg() {
     runTokenRef.current += 1;
     releaseCamera();
   }, [releaseCamera]);
+
+  useEffect(() => () => {
+    if (recordedVideoUrl) URL.revokeObjectURL(recordedVideoUrl);
+  }, [recordedVideoUrl]);
 
   const stop = useCallback(() => {
     runTokenRef.current += 1;
@@ -222,6 +242,11 @@ export function useFingertipPpg() {
     setSamples([]);
     setSampleCount(0);
     setMarkers([]);
+    setRecordedVideoUrl(null);
+    setRecordedVideoName(null);
+    setVideoRecordingActive(false);
+    setVideoRecordingError(null);
+    videoChunksRef.current = [];
     setReport(null);
     startedAtRef.current = 0;
     recordingSamplesRef.current = [];
@@ -311,10 +336,54 @@ export function useFingertipPpg() {
       if (!video) throw new Error('PPG:The camera preview did not start. Allow camera access and try again.');
 
       const canvas = document.createElement('canvas');
-      canvas.width = 80;
-      canvas.height = 60;
+      canvas.width = 320;
+      canvas.height = 240;
       const context = canvas.getContext('2d', { willReadFrequently: true });
       if (!context) throw new Error('PPG:This browser could not prepare the local camera signal.');
+
+      if (typeof MediaRecorder === 'undefined') {
+        setVideoRecordingError('This browser cannot save camera video. Pulse measurement will still work.');
+      } else {
+        try {
+          const mimeType = [
+            'video/mp4;codecs=avc1.42E01E',
+            'video/mp4',
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm',
+          ].find((type) => MediaRecorder.isTypeSupported(type));
+          const options: MediaRecorderOptions = { videoBitsPerSecond: 4_000_000 };
+          if (mimeType) options.mimeType = mimeType;
+          const recorder = new MediaRecorder(stream, options);
+          videoChunksRef.current = [];
+          recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) videoChunksRef.current.push(event.data);
+          };
+          recorder.onstop = () => {
+            const chunks = videoChunksRef.current;
+            videoChunksRef.current = [];
+            setVideoRecordingActive(false);
+            if (chunks.length === 0) return;
+
+            const contentType = recorder.mimeType || 'video/webm';
+            const blob = new Blob(chunks, { type: contentType });
+            if (blob.size === 0) return;
+            const extension = contentType.includes('mp4') ? 'mp4' : 'webm';
+            const timestamp = new Date().toISOString().replaceAll(':', '-').slice(0, 19);
+            setRecordedVideoName(`ppg_better_${timestamp}.${extension}`);
+            setRecordedVideoUrl(URL.createObjectURL(blob));
+          };
+          recorder.onerror = () => {
+            setVideoRecordingActive(false);
+            setVideoRecordingError('The browser could not finish saving this video. Pulse measurements remain available.');
+          };
+          recorder.start(1000);
+          mediaRecorderRef.current = recorder;
+          setVideoRecordingActive(true);
+        } catch {
+          setVideoRecordingError('Video recording is unavailable in this browser. Pulse measurement will still work.');
+        }
+      }
 
       const captureFrame = () => {
         if (runToken !== runTokenRef.current || !cameraActiveRef.current) return;
@@ -333,18 +402,21 @@ export function useFingertipPpg() {
             lastSampleAtRef.current = now;
             context.drawImage(currentVideo, 0, 0, canvas.width, canvas.height);
             const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-            let greenTotal = 0;
+            let lumaTotal = 0;
             let pixelCount = 0;
-            for (let index = 1; index < pixels.length; index += 4) {
-              greenTotal += pixels[index] ?? 0;
+            for (let index = 0; index < pixels.length; index += 4) {
+              const red = pixels[index] ?? 0;
+              const green = pixels[index + 1] ?? 0;
+              const blue = pixels[index + 2] ?? 0;
+              lumaTotal += 0.299 * red + 0.587 * green + 0.114 * blue;
               pixelCount += 1;
             }
 
             if (pixelCount > 0) {
               const elapsed = (now - startedAtRef.current) / 1000;
-              const greenMean = greenTotal / pixelCount;
+              const lumaMean = lumaTotal / pixelCount;
               const baselineWindow = rawBaselineWindowRef.current;
-              baselineWindow.push({ elapsedSeconds: elapsed, value: greenMean });
+              baselineWindow.push({ elapsedSeconds: elapsed, value: lumaMean });
               while (
                 baselineWindow.length > 0 &&
                 elapsed - (baselineWindow[0]?.elapsedSeconds ?? elapsed) > BASELINE_WINDOW_SECONDS
@@ -355,7 +427,7 @@ export function useFingertipPpg() {
               const baseline =
                 baselineWindow.reduce((sum, sample) => sum + sample.value, 0) /
                 Math.max(1, baselineWindow.length);
-              const centered = greenMean - baseline;
+              const centered = lumaMean - baseline;
               const previousFiltered = lastFilteredSignalRef.current;
               const filteredSignal =
                 previousFiltered === null
@@ -363,7 +435,7 @@ export function useFingertipPpg() {
                   : FILTER_ALPHA * centered + (1 - FILTER_ALPHA) * previousFiltered;
               lastFilteredSignalRef.current = filteredSignal;
 
-              const sample: PpgSample = { elapsedSeconds: elapsed, greenMean, filteredSignal };
+              const sample: PpgSample = { elapsedSeconds: elapsed, lumaMean, filteredSignal };
               recordingSamplesRef.current.push(sample);
               const signalWindow = signalWindowRef.current;
               signalWindow.push(sample);
@@ -513,14 +585,14 @@ export function useFingertipPpg() {
     if (recordedSamples.length === 0) return;
 
     const header =
-      'record_type,elapsed_seconds,green_mean,filtered_signal,breathing_event,heart_rate_bpm,signal_quality_percent,sdnn_ms,rmssd_ms,pnn50_percent,mean_pulse_interval_ms';
+      'record_type,elapsed_seconds,luma_mean,filtered_signal,breathing_event,heart_rate_bpm,signal_quality_percent,sdnn_ms,rmssd_ms,pnn50_percent,mean_pulse_interval_ms';
     const rows = [
       ...recordedSamples.map((sample) => ({
         time: sample.elapsedSeconds,
         row: [
           'sample',
           sample.elapsedSeconds.toFixed(3),
-          csvNumber(sample.greenMean),
+          csvNumber(sample.lumaMean),
           csvNumber(sample.filteredSignal),
           '',
           '',
@@ -581,10 +653,19 @@ export function useFingertipPpg() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `vitallens-ppg-${new Date().toISOString().slice(0, 19).replaceAll(':', '-')}.csv`;
+    anchor.download = `ppg_better_${new Date().toISOString().slice(0, 19).replaceAll(':', '-')}.csv`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, []);
+
+  const downloadVideo = useCallback(() => {
+    if (!recordedVideoUrl || !recordedVideoName) return;
+    const anchor = document.createElement('a');
+    anchor.href = recordedVideoUrl;
+    anchor.download = recordedVideoName;
+    anchor.rel = 'noopener';
+    anchor.click();
+  }, [recordedVideoName, recordedVideoUrl]);
 
   return {
     videoRef,
@@ -600,10 +681,15 @@ export function useFingertipPpg() {
     samples,
     sampleCount,
     markers,
+    recordedVideoUrl,
+    recordedVideoName,
+    videoRecordingActive,
+    videoRecordingError,
     report,
     onStart: start,
     onStop: stop,
     onMarkBreathing: markBreathing,
     onExportCsv: exportCsv,
+    onDownloadVideo: downloadVideo,
   };
 }

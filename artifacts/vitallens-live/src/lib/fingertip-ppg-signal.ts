@@ -20,16 +20,16 @@ interface PpgPeak {
   prominence: number;
 }
 
-const HEART_RATE_WINDOW_SECONDS = 12;
+const HEART_RATE_WINDOW_SECONDS = 10;
 const HRV_WINDOW_SECONDS = 60;
-const MIN_SIGNAL_SECONDS = 5.5;
 const MIN_HRV_SECONDS = 60;
-const MIN_BPM = 40;
+const MIN_BPM = 45;
 const MAX_BPM = 180;
 const MIN_PEAK_GAP_SECONDS = 0.28;
 const MIN_VALID_HRV_INTERVALS = 30;
 const MIN_SIGNAL_VARIANCE = 0.0025;
-export const MIN_PPG_GREEN_MEAN = 8;
+const ANDROID_SAMPLE_GATE = 256;
+export const MIN_PPG_LUMA_MEAN = 8;
 const ILLUMINATION_WINDOW_SECONDS = 2.4;
 
 function median(values: readonly number[]): number | null {
@@ -55,7 +55,8 @@ function getWindow(
 ): { samples: PpgSample[]; durationSeconds: number } {
   const validSamples = samples.filter((sample) =>
     Number.isFinite(sample.elapsedSeconds) &&
-    Number.isFinite(sample.filteredSignal),
+    Number.isFinite(sample.filteredSignal) &&
+    Number.isFinite(sample.lumaMean),
   );
   const first = validSamples[0];
   const last = validSamples[validSamples.length - 1];
@@ -227,20 +228,20 @@ function getPeriodicityScore(
 export function estimatePpgHeartRate(samples: readonly PpgSample[]): PpgEstimate {
   const window = getWindow(samples, HEART_RATE_WINDOW_SECONDS);
   if (
-    window.durationSeconds < MIN_SIGNAL_SECONDS ||
-    window.samples.length < 20
+    samples.length < ANDROID_SAMPLE_GATE ||
+    window.samples.length < ANDROID_SAMPLE_GATE
   ) {
     return { bpm: null, quality: null };
   }
 
   const latestElapsed = window.samples[window.samples.length - 1]?.elapsedSeconds;
-  const recentGreenMeans = window.samples
+  const recentLumaMeans = window.samples
     .filter((sample) =>
       latestElapsed !== undefined &&
       latestElapsed - sample.elapsedSeconds <= ILLUMINATION_WINDOW_SECONDS,
     )
-    .map((sample) => sample.greenMean);
-  if ((median(recentGreenMeans) ?? 0) < MIN_PPG_GREEN_MEAN) {
+    .map((sample) => sample.lumaMean);
+  if ((median(recentLumaMeans) ?? 0) < MIN_PPG_LUMA_MEAN) {
     return { bpm: null, quality: 0 };
   }
 

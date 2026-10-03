@@ -8,7 +8,7 @@ export type PpgBreathingEvent = 'inhale' | 'exhale';
 
 export interface PpgSample {
   elapsedSeconds: number;
-  greenMean: number;
+  lumaMean: number;
   filteredSignal: number;
 }
 
@@ -31,8 +31,13 @@ export interface PpgModeProps {
   samples: readonly PpgSample[];
   sampleCount: number;
   markers: readonly PpgBreathingMarker[];
+  recordedVideoUrl: string | null;
+  recordedVideoName: string | null;
+  videoRecordingActive: boolean;
+  videoRecordingError: string | null;
   onStart: () => void;
   onStop: () => void;
   onMarkBreathing: (event: PpgBreathingEvent) => void;
   onExportCsv: () => void;
+  onDownloadVideo: () => void;
 }

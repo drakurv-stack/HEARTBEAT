@@ -30,7 +30,7 @@ const { createMeasurementReport } = reportModule.exports;
 function makeSamples({
   durationSeconds,
   bpmAt = () => 72,
-  baseGreenMean = 125,
+  baseLumaMean = 125,
   pulseAmplitude = 2.5,
   noiseAmplitude = 0.25,
   slowDriftAmplitude = 0.3,
@@ -67,13 +67,13 @@ function makeSamples({
 
     randomState = (randomState * 48271) % 2147483647;
     const noise = (randomState / 2147483647 - 0.5) * noiseAmplitude;
-    const greenMean =
-      baseGreenMean +
+    const lumaMean =
+      baseLumaMean +
       pulse +
       slowDriftAmplitude * Math.sin((2 * Math.PI * elapsedSeconds) / 8) +
       noise;
 
-    baselineWindow.push({ elapsedSeconds, value: greenMean });
+    baselineWindow.push({ elapsedSeconds, value: lumaMean });
     while (
       baselineWindow.length > 0 &&
       elapsedSeconds - baselineWindow[0].elapsedSeconds > 2.4
@@ -83,19 +83,19 @@ function makeSamples({
     const baseline =
       baselineWindow.reduce((sum, sample) => sum + sample.value, 0) /
       baselineWindow.length;
-    const centered = greenMean - baseline;
+    const centered = lumaMean - baseline;
     filteredSignal =
       filteredSignal === null
         ? centered
         : 0.72 * centered + 0.28 * filteredSignal;
-    samples.push({ elapsedSeconds, greenMean, filteredSignal });
+    samples.push({ elapsedSeconds, lumaMean, filteredSignal });
   }
 
   return samples;
 }
 
 for (const expectedBpm of [
-  40, 48, 55, 60, 70, 72, 80, 90, 100, 110, 120, 135, 150, 165, 175, 180,
+  45, 48, 55, 60, 70, 72, 80, 90, 100, 110, 120, 135, 150, 165, 175, 180,
 ]) {
   const estimate = estimatePpgHeartRate(
     makeSamples({
@@ -111,6 +111,12 @@ for (const expectedBpm of [
   );
   console.log(`${expectedBpm} BPM PPG waveform -> ${estimate.bpm} BPM`);
 }
+
+const belowAndroidRange = estimatePpgHeartRate(
+  makeSamples({ durationSeconds: 20, bpmAt: () => 40, seed: 40 }),
+);
+assert.equal(belowAndroidRange.bpm, null, 'Rates below the Android 45 BPM limit must be withheld');
+console.log('40 BPM -> withheld below Android minimum');
 
 const changingSamples = makeSamples({
   durationSeconds: 26,
@@ -177,7 +183,7 @@ console.log('Noise-only signal -> no pulse estimate');
 const darkSignal = estimatePpgHeartRate(
   makeSamples({
     durationSeconds: 16,
-    baseGreenMean: 1.5,
+    baseLumaMean: 1.5,
     pulseAmplitude: 1.2,
     noiseAmplitude: 0.04,
     slowDriftAmplitude: 0.05,

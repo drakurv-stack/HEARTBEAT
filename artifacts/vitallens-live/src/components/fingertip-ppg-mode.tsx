@@ -1,85 +1,63 @@
-import { useMemo } from 'react';
-import {
-  Activity,
-  ArrowLeft,
-  ArrowUpRight,
-  Check,
-  CircleAlert,
-  Download,
-  Fingerprint,
-  Flashlight,
-  HeartPulse,
-  Info,
-  LockKeyhole,
-  Pause,
-  Play,
-  Wind,
-} from 'lucide-react';
-import { MIN_PPG_GREEN_MEAN } from '../lib/fingertip-ppg-signal';
-import type { PpgModeProps } from '../lib/fingertip-ppg-types';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
+import type { PpgModeProps } from '../lib/fingertip-ppg-types';
 import './fingertip-ppg-mode.css';
+
+const ANDROID_SAMPLE_GATE = 256;
 
 const formatTime = (seconds: number) => {
   const safeSeconds = Math.max(0, Math.floor(seconds));
   return `${String(Math.floor(safeSeconds / 60)).padStart(2, '0')}:${String(safeSeconds % 60).padStart(2, '0')}`;
 };
 
-function SignalPlot({ samples, sampleCount, active, markers }: Pick<PpgModeProps, 'samples' | 'sampleCount' | 'markers'> & { active: boolean }) {
+function SignalPlot({
+  samples,
+  markers,
+}: Pick<PpgModeProps, 'samples' | 'markers'>) {
   const plot = useMemo(() => {
-    const recent = samples.slice(-160);
-    if (!recent.length) return { path: '', markerPositions: [] as number[] };
-    const values = recent.map((sample) => sample.filteredSignal);
+    const recent = samples.slice(-100);
+    if (!recent.length) return { path: '', ticks: [] as Array<{ y: number; label: string }>, markerPositions: [] as number[] };
+
+    const values = recent.map((sample) => sample.lumaMean);
     const low = Math.min(...values);
     const high = Math.max(...values);
     const range = high - low || 1;
     const path = values.map((value, index) => {
-      const x = 12 + (index / Math.max(1, values.length - 1)) * 576;
-      const y = 72 - ((value - low) / range) * 50;
+      const x = 39 + (index / Math.max(1, values.length - 1)) * 257;
+      const y = 12 + ((high - value) / range) * 164;
       return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
     }).join(' ');
-    const from = recent[0].elapsedSeconds;
-    const to = recent[recent.length - 1].elapsedSeconds;
+    const ticks = Array.from({ length: 5 }, (_, index) => {
+      const ratio = index / 4;
+      return {
+        y: 12 + ratio * 164,
+        label: (high - ratio * range).toFixed(0),
+      };
+    });
+    const start = recent[0]?.elapsedSeconds ?? 0;
+    const end = recent[recent.length - 1]?.elapsedSeconds ?? start;
     const markerPositions = markers
-      .filter((marker) => marker.elapsedSeconds >= from && marker.elapsedSeconds <= to)
-      .map((marker) => 12 + ((marker.elapsedSeconds - from) / Math.max(.01, to - from)) * 576);
-    return { path, markerPositions };
-  }, [samples, markers]);
+      .filter((marker) => marker.elapsedSeconds >= start && marker.elapsedSeconds <= end)
+      .map((marker) => 39 + ((marker.elapsedSeconds - start) / Math.max(0.01, end - start)) * 257);
+
+    return { path, ticks, markerPositions };
+  }, [markers, samples]);
 
   return (
-    <div className={`ppg-wave ${active ? 'ppg-wave-active' : ''}`} role="img" aria-label={active && samples.length ? 'Live fingertip pulse waveform' : 'Waveform appears when a measurement begins'}>
-      <div className="ppg-wave-top"><span><Activity size={14} /> OPTICAL PULSE · GREEN CHANNEL</span><span>{active ? 'LIVE' : 'SIGNAL TRACE'}</span></div>
-      <svg viewBox="0 0 600 96" preserveAspectRatio="none" aria-hidden="true">
-        <path className="ppg-grid" d="M0 24H600M0 48H600M0 72H600M100 0V96M200 0V96M300 0V96M400 0V96M500 0V96" />
-        {plot.markerPositions.map((x, index) => <line key={`${x}-${index}`} className="ppg-marker-line" x1={x} x2={x} y1="9" y2="86" />)}
-        {plot.path
-          ? <path className="ppg-wave-line" d={plot.path} />
-          : <path className="ppg-wave-empty" d="M0 49 C22 48 26 52 43 49 S69 45 86 49 S112 53 129 49 S155 46 172 49 S198 52 215 49 S241 46 258 49 S284 52 301 49 S327 46 344 49 S370 52 387 49 S413 46 430 49 S456 52 473 49 S499 46 516 49 S542 52 559 49 S585 46 600 49" />}
+    <div className="native-ppg-chart" role="img" aria-label="Live camera brightness signal">
+      <svg viewBox="0 0 300 200" preserveAspectRatio="none" aria-hidden="true">
+        {plot.ticks.map((tick, index) => (
+          <g key={`${tick.y}-${index}`}>
+            <text x="3" y={tick.y + 3}>{tick.label}</text>
+            <line x1="35" x2="299" y1={tick.y} y2={tick.y} />
+          </g>
+        ))}
+        {plot.markerPositions.map((x, index) => (
+          <line className="native-ppg-marker" key={`${x}-${index}`} x1={x} x2={x} y1="10" y2="182" />
+        ))}
+        {plot.path && <path className="native-ppg-trace" d={plot.path} />}
       </svg>
-      <div className="ppg-wave-legend"><span><i /> FILTERED PPG</span><span>{sampleCount ? `${sampleCount} SAMPLES` : 'WAITING FOR SIGNAL'}</span></div>
     </div>
-  );
-}
-
-function VariabilityCard({
-  label,
-  value,
-  unit,
-  precision = 1,
-}: {
-  label: string;
-  value: number | null;
-  unit: string;
-  precision?: number;
-}) {
-  return (
-    <article className="ppg-variability-card">
-      <span>{label}</span>
-      <strong data-testid={`metric-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`}>
-        {value === null ? '—' : value.toFixed(precision)}
-        <small>{value === null ? '' : unit}</small>
-      </strong>
-    </article>
   );
 }
 
@@ -89,200 +67,162 @@ export function FingertipPpgMode({
   cameraActive,
   bpm,
   signalQuality,
-  variability,
   torchStatus,
   elapsedSeconds,
-  cleanSignalSeconds,
   errorMessage,
   samples,
   sampleCount,
   markers,
+  recordedVideoUrl,
+  recordedVideoName,
+  videoRecordingActive,
+  videoRecordingError,
   onStart,
   onStop,
   onMarkBreathing,
   onExportCsv,
+  onDownloadVideo,
 }: PpgModeProps) {
+  const [breathingIn, setBreathingIn] = useState(false);
   const active = cameraActive || phase === 'starting' || phase === 'warming' || phase === 'live';
-  const qualityPercent = signalQuality === null ? null : Math.round(Math.min(100, Math.max(0, signalQuality)));
-  const qualityLabel = qualityPercent === null ? 'Waiting' : qualityPercent >= 75 ? 'Strong' : qualityPercent >= 45 ? 'Fair' : 'Low';
-  const lowGreenSignal = useMemo(() => {
-    const latestSample = samples[samples.length - 1];
-    if (!active || bpm !== null || !latestSample || samples.length < 20) return false;
+  const canMarkBreathing = cameraActive && sampleCount >= ANDROID_SAMPLE_GATE;
 
-    const recentGreenValues = samples
-      .filter((sample) => latestSample.elapsedSeconds - sample.elapsedSeconds <= 3)
-      .map((sample) => sample.greenMean)
-      .filter(Number.isFinite)
-      .sort((left, right) => left - right);
-    if (recentGreenValues.length < 20) return false;
+  useEffect(() => {
+    if (!cameraActive) setBreathingIn(false);
+  }, [cameraActive]);
 
-    const middle = Math.floor(recentGreenValues.length / 2);
-    const lower = recentGreenValues[middle - 1];
-    const upper = recentGreenValues[middle];
-    const medianGreenMean = recentGreenValues.length % 2 === 0 && lower !== undefined && upper !== undefined
-      ? (lower + upper) / 2
-      : upper;
-    return medianGreenMean !== undefined && medianGreenMean < MIN_PPG_GREEN_MEAN;
-  }, [active, bpm, samples]);
-  const variabilityReady = Boolean(
-    variability &&
-    variability.sdnnMs !== null &&
-    variability.rmssdMs !== null &&
-    variability.pnn50Percent !== null &&
-    variability.meanPpiMs !== null,
-  );
-  const variabilityProgress = Math.min(60, cleanSignalSeconds);
-  const signalGuidance = lowGreenSignal
-    ? torchStatus === 'unsupported' || torchStatus === 'unavailable'
-      ? 'The camera image is almost black, and this browser could not enable the rear flash. Finger PPG needs enough light through the fingertip; try a phone browser that supports the camera torch, then cover the rear lens and flash.'
-      : 'Very little green light is reaching the camera. Make sure the rear flash is on, place your fingertip over both the lens and flash, and keep it still with light pressure.'
-    : active && qualityPercent !== null && qualityPercent < 30
-      ? 'No clear pulse yet. Cover the rear camera lens and flash completely with your fingertip, and hold the phone and finger still.'
-      : active && qualityPercent === null
-        ? 'Place your fingertip over both the rear camera lens and flash, then hold still while the signal settles.'
-        : qualityPercent !== null && qualityPercent >= 75
-          ? 'Good contact. Keep your finger relaxed and still.'
-          : 'Use light, steady pressure. Avoid pressing hard or shifting.';
   const torchLabel = {
-    idle: 'Start a session to check support',
-    checking: 'Checking torch support',
-    on: 'Torch on',
-    off: 'Torch off',
-    unsupported: 'Torch not supported',
-    unavailable: 'Torch unavailable',
+    idle: 'Not started',
+    checking: 'Checking',
+    on: 'On',
+    off: 'Off',
+    unsupported: 'Not supported by this browser',
+    unavailable: 'Unavailable',
   }[torchStatus];
 
+  const heartRateMessage = bpm !== null
+    ? `HR: ${Math.round(bpm)} BPM`
+    : sampleCount < ANDROID_SAMPLE_GATE
+      ? `${ANDROID_SAMPLE_GATE - sampleCount} more samples`
+      : signalQuality === 0
+        ? 'Hold your fingertip still over the rear camera and flash'
+        : 'Finding a steady pulse';
+
+  const markBreathing = () => {
+    const event = breathingIn ? 'exhale' : 'inhale';
+    onMarkBreathing(event);
+    setBreathingIn(!breathingIn);
+  };
+
   return (
-    <main className="ppg-page">
-      <header className="ppg-header">
-        <Link className="ppg-brand" href="/" aria-label="VitalLens Live face-camera demo" data-testid="link-ppg-home">
-          <span className="ppg-brand-mark"><Activity size={18} strokeWidth={1.8} /></span>
-          <span>vital<span>lens</span><sup>LIVE</sup></span>
-        </Link>
-        <Link className="ppg-back" href="/" data-testid="link-face-camera-demo"><ArrowLeft size={15} /> Face-camera demo <ArrowUpRight size={13} /></Link>
-      </header>
+    <main className="native-ppg-page">
+      <div className="native-ppg-shell">
+        <header className="native-ppg-header">
+          <Link href="/" aria-label="Back to VitalLens">‹ VitalLens</Link>
+        </header>
 
-      <section className="ppg-intro">
-        <div className="ppg-eyebrow"><span /> CAMERA MODE / 02</div>
-        <div className="ppg-intro-row">
-          <div>
-            <p className="ppg-overline">A quieter way to explore your pulse</p>
-            <h1>Pulse, in the<br className="ppg-title-break" /> palm of your hand<span>.</span></h1>
-          </div>
-        <p className="ppg-intro-copy">Cover the rear camera lens and flash with a relaxed fingertip. The browser follows green-channel light changes locally; flash support depends on your device. Stop if the phone or flash feels hot.</p>
-        </div>
-        <div className="ppg-mode-switch" aria-label="Camera modes">
-          <Link href="/" className="ppg-mode-link" data-testid="link-mode-face-camera">Face camera</Link>
-          <span className="ppg-mode-current"><Fingerprint size={15} /> Fingertip PPG <i>ACTIVE MODE</i></span>
-        </div>
-      </section>
+        <h1>PPG Heart Rate Monitor Better</h1>
 
-      <section className="ppg-console" aria-label="Fingertip pulse measurement">
-        <div className="ppg-capture">
-          <div className="ppg-section-head">
-            <span><b>01</b> CAMERA / LOCAL PREVIEW</span>
-            <span className={`ppg-phase-tag ppg-phase-${phase}`}><i />{phase === 'live' ? 'READING' : phase === 'warming' ? 'SETTLING' : phase === 'starting' ? 'STARTING' : phase === 'error' ? 'PAUSED' : 'READY'}</span>
-          </div>
-          <div className={`ppg-preview ${cameraActive ? 'is-active' : ''}`}>
-            <video ref={videoRef} muted playsInline aria-label="Local fingertip camera preview" />
-            {!cameraActive && <div className="ppg-preview-placeholder">
-              <div className="ppg-lens-symbol"><span /><Fingerprint size={31} strokeWidth={1.25} /></div>
-              <strong>{phase === 'error' ? 'Measurement paused' : 'Your camera stays here'}</strong>
-              <p>{phase === 'error' ? 'Check the camera and try starting again.' : 'Place your fingertip gently over the rear camera lens when prompted.'}</p>
-              <span className="ppg-local-chip"><LockKeyhole size={13} /> PREVIEW STAYS IN THIS BROWSER</span>
-            </div>}
-            {cameraActive && <div className="ppg-camera-corner"><span className="ppg-live-dot" /> LOCAL CAMERA</div>}
-            <div className="ppg-preview-time"><span>SESSION TIME</span><strong>{formatTime(elapsedSeconds)}</strong></div>
-          </div>
-          <div className="ppg-controls">
-            <div className="ppg-status-copy">
-              <span className={`ppg-status-led ${active ? 'is-on' : ''}`} />
-              <div><strong data-testid="status-ppg-phase">{phase === 'error' ? 'Needs attention' : phase === 'live' ? 'Signal is live' : phase === 'warming' ? 'Finding a steady signal' : active ? 'Preparing measurement' : 'Ready when you are'}</strong>
-                <small>{cameraActive ? 'CAMERA ACTIVE · PROCESSING LOCALLY' : 'NO CAMERA ACCESS UNTIL YOU START'}</small></div>
+        <div className={`native-ppg-camera ${cameraActive ? 'is-active' : ''}`}>
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            aria-label="Rear camera preview"
+            data-testid="ppg-camera-preview"
+          />
+          {!cameraActive && (
+            <div className="native-ppg-camera-placeholder">
+              {phase === 'error' ? 'Camera stopped' : 'Camera preview'}
+              <small>{active ? 'Waiting for camera permission…' : 'Start recording to open the rear camera'}</small>
             </div>
-            {active ? (
-              <button className="ppg-stop" type="button" onClick={onStop} data-testid="button-stop-measurement"><Pause size={15} fill="currentColor" /> Stop measurement</button>
-            ) : (
-              <button className="ppg-start" type="button" onClick={onStart} data-testid="button-start-measurement">
-                <Play size={15} fill="currentColor" /> {phase === 'error' ? 'Try again' : 'Start measurement'}
+          )}
+        </div>
+
+        <p className="native-ppg-timer" data-testid="ppg-session-timer">{formatTime(elapsedSeconds)}</p>
+
+        <div className="native-ppg-controls">
+          {active ? (
+            <button
+              className="native-ppg-button"
+              type="button"
+              onClick={onStop}
+              data-testid="button-stop-measurement"
+            >
+              Stop recording
+            </button>
+          ) : (
+            <button
+              className="native-ppg-button"
+              type="button"
+              onClick={onStart}
+              data-testid="button-start-measurement"
+              disabled={phase === 'starting'}
+            >
+              {phase === 'error' ? 'Try again' : 'Start recording'}
+            </button>
+          )}
+          <button
+            className="native-ppg-button"
+            type="button"
+            onClick={markBreathing}
+            disabled={!canMarkBreathing}
+            data-testid="button-toggle-breath"
+          >
+            {breathingIn ? 'Exhale' : 'Inhale'}
+          </button>
+        </div>
+
+        <div className="native-ppg-local-note">
+          <span className={active ? 'is-recording' : ''} />
+          {active ? 'Recording locally on this device' : 'Camera and pulse data stay on this device'}
+        </div>
+
+        {errorMessage && <p className="native-ppg-error" role="alert">{errorMessage}</p>}
+        {videoRecordingError && <p className="native-ppg-warning" role="status">{videoRecordingError}</p>}
+
+        <p className="native-ppg-heart-rate" data-testid="metric-fingertip-bpm">
+          {heartRateMessage}
+        </p>
+        <p className="native-ppg-guidance">
+          Cover the rear camera lens and flash with a relaxed fingertip. Keep the phone and finger still.
+        </p>
+
+        <SignalPlot samples={samples} markers={markers} />
+
+        <div className="native-ppg-recording-status" aria-live="polite">
+          <span>Flash: {torchLabel}</span>
+          <span>{videoRecordingActive ? 'Saving video…' : 'Video recording stays local'}</span>
+        </div>
+
+        {markers.length > 0 && (
+          <div className="native-ppg-marker-log" aria-label="Breathing log">
+            {markers.slice(-4).reverse().map((marker, index) => (
+              <span key={`${marker.elapsedSeconds}-${marker.event}-${index}`}>
+                {formatTime(marker.elapsedSeconds)} · {marker.event}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {!active && sampleCount > 0 && (
+          <div className="native-ppg-downloads">
+            {recordedVideoUrl && recordedVideoName && (
+              <button className="native-ppg-download" type="button" onClick={onDownloadVideo}>
+                Download video ({recordedVideoName.endsWith('.mp4') ? 'MP4' : 'WebM'})
               </button>
             )}
+            {videoRecordingActive && <span>Finishing video file…</span>}
+            <button className="native-ppg-download" type="button" onClick={onExportCsv}>
+              Download local pulse log
+            </button>
           </div>
-          {errorMessage && <div className="ppg-error" role="alert"><CircleAlert size={16} /><span>{errorMessage}</span></div>}
-          <div className="ppg-device-strip">
-            <span><Flashlight size={14} /><b>TORCH</b> {torchLabel}</span>
-            <span className="ppg-device-divider" />
-            <span><LockKeyhole size={14} /><b>PRIVACY</b> Local signal only</span>
-          </div>
-          <p className="ppg-privacy-note"><LockKeyhole size={14} /> This mode processes camera-derived signal in your browser. No camera frames are sent to the VitalLens API.</p>
-        </div>
+        )}
 
-        <aside className="ppg-readout">
-          <div className="ppg-section-head"><span><b>02</b> LIVE READOUT</span><span className="ppg-readout-caption">FINGERTIP PPG</span></div>
-          <div className="ppg-bpm-panel">
-            <div className="ppg-bpm-label"><HeartPulse size={16} /> PULSE RATE <span>ESTIMATE</span></div>
-            <div className="ppg-bpm-value" data-testid="metric-fingertip-bpm">{bpm !== null ? Math.round(bpm) : <span>—</span>}<small>BPM</small></div>
-            <div className="ppg-bpm-foot"><span>{bpm !== null ? 'Current camera-derived estimate' : active ? 'Waiting for a clean pulse pattern' : 'Start a session to begin'}</span><span className="ppg-approx">APPROXIMATE</span></div>
-          </div>
-
-          <div className="ppg-quality">
-            <div className="ppg-quality-head"><span>SIGNAL QUALITY</span><strong data-testid="metric-ppg-signal-quality">{qualityPercent === null ? '—' : `${qualityPercent}%`} <i>{qualityLabel}</i></strong></div>
-            <div className="ppg-quality-track" role="meter" aria-label="Signal quality" aria-valuemin={0} aria-valuemax={100} aria-valuenow={qualityPercent ?? 0}><span style={{ width: `${qualityPercent ?? 0}%` }} /></div>
-            <p>{signalGuidance}</p>
-          </div>
-
-          <section className="ppg-variability" aria-label="Pulse interval variability" data-testid="ppg-variability">
-            <div className="ppg-variability-heading">
-              <strong>Pulse interval variability</strong>
-              <span>{variabilityReady ? '60 SEC · PPG' : `${Math.floor(variabilityProgress)} / 60 SEC`}</span>
-            </div>
-            <div
-              className="ppg-variability-progress"
-              role="progressbar"
-              aria-label="Clean signal collected for pulse variability"
-              aria-valuemin={0}
-              aria-valuemax={60}
-              aria-valuenow={Math.floor(variabilityProgress)}
-            >
-              <span style={{ width: `${(variabilityProgress / 60) * 100}%` }} />
-            </div>
-            <div className="ppg-variability-grid">
-              <VariabilityCard label="SDNN" value={variability?.sdnnMs ?? null} unit="ms" />
-              <VariabilityCard label="RMSSD" value={variability?.rmssdMs ?? null} unit="ms" />
-              <VariabilityCard label="pNN50" value={variability?.pnn50Percent ?? null} unit="%" />
-              <VariabilityCard label="Mean PPI" value={variability?.meanPpiMs ?? null} unit="ms" precision={0} />
-            </div>
-            <p>Estimated from optical pulse-to-pulse intervals, not ECG. Values appear only after 60 seconds of clean signal.</p>
-          </section>
-
-          <SignalPlot samples={samples} sampleCount={sampleCount} active={phase === 'live'} markers={markers} />
-
-          <div className="ppg-breathing">
-            <div className="ppg-breathing-heading"><span><Wind size={16} /> BREATHING MARKERS</span><span>{markers.length} MARKED</span></div>
-            <p>Mark moments as you breathe, if useful. These are personal notes, not an assessment.</p>
-            <div className="ppg-breathing-actions">
-              <button type="button" onClick={() => onMarkBreathing('inhale')} disabled={!cameraActive} data-testid="button-mark-inhale"><span className="ppg-inhale-mark" /> Mark inhale</button>
-              <button type="button" onClick={() => onMarkBreathing('exhale')} disabled={!cameraActive} data-testid="button-mark-exhale"><span className="ppg-exhale-mark" /> Mark exhale</button>
-            </div>
-            {markers.length > 0 && <div className="ppg-marker-list" aria-label="Recent breathing markers" data-testid="list-breathing-markers">
-              {markers.slice(-3).reverse().map((marker, index) => <span key={`${marker.elapsedSeconds}-${marker.event}-${index}`}><i className={marker.event} />{marker.event} · {formatTime(marker.elapsedSeconds)}</span>)}
-            </div>}
-          </div>
-
-          <button className="ppg-export" type="button" onClick={onExportCsv} disabled={sampleCount === 0} data-testid="button-export-ppg-csv"><Download size={15} /> Export session as CSV <span>{sampleCount ? `${sampleCount} samples` : 'Available after sampling'}</span></button>
-        </aside>
-      </section>
-
-      <section className="ppg-guidance">
-        <div className="ppg-guidance-icon"><Info size={17} /></div>
-        <div><strong>Explore gently. This is wellness-only.</strong><p>Camera pulse estimates can be affected by movement, lighting, temperature, and fit. Stop if the phone or flash feels hot; heart rate may appear before the optional 60-second variability window. These estimates are for general wellness exploration only—not medical advice, diagnosis, or a substitute for care.</p></div>
-        <div className="ppg-guidance-check"><Check size={14} /> No account. No frame upload.</div>
-      </section>
-
-      <footer className="ppg-footer">
-        <span><span className="ppg-footer-mark">V</span> VitalLens Live <i>/</i> fingertip mode</span>
-        <span>LOCAL SIGNAL PROCESSING <i>·</i> WELLNESS ONLY</span>
-      </footer>
+        <p className="native-ppg-safety">
+          Wellness use only. Stop if the phone or flash becomes hot. Browser video files are downloaded to your device when you choose.
+        </p>
+      </div>
     </main>
   );
 }
