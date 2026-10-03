@@ -29,6 +29,8 @@ const MAX_BPM = 180;
 const MIN_PEAK_GAP_SECONDS = 0.28;
 const MIN_VALID_HRV_INTERVALS = 30;
 const MIN_SIGNAL_VARIANCE = 0.0025;
+export const MIN_PPG_GREEN_MEAN = 8;
+const ILLUMINATION_WINDOW_SECONDS = 2.4;
 
 function median(values: readonly number[]): number | null {
   if (values.length === 0) return null;
@@ -229,6 +231,17 @@ export function estimatePpgHeartRate(samples: readonly PpgSample[]): PpgEstimate
     window.samples.length < 20
   ) {
     return { bpm: null, quality: null };
+  }
+
+  const latestElapsed = window.samples[window.samples.length - 1]?.elapsedSeconds;
+  const recentGreenMeans = window.samples
+    .filter((sample) =>
+      latestElapsed !== undefined &&
+      latestElapsed - sample.elapsedSeconds <= ILLUMINATION_WINDOW_SECONDS,
+    )
+    .map((sample) => sample.greenMean);
+  if ((median(recentGreenMeans) ?? 0) < MIN_PPG_GREEN_MEAN) {
+    return { bpm: null, quality: 0 };
   }
 
   const { peaks, standardDeviation } = detectPeaks(window.samples);

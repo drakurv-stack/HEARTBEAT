@@ -30,6 +30,7 @@ const { createMeasurementReport } = reportModule.exports;
 function makeSamples({
   durationSeconds,
   bpmAt = () => 72,
+  baseGreenMean = 125,
   pulseAmplitude = 2.5,
   noiseAmplitude = 0.25,
   slowDriftAmplitude = 0.3,
@@ -67,7 +68,7 @@ function makeSamples({
     randomState = (randomState * 48271) % 2147483647;
     const noise = (randomState / 2147483647 - 0.5) * noiseAmplitude;
     const greenMean =
-      125 +
+      baseGreenMean +
       pulse +
       slowDriftAmplitude * Math.sin((2 * Math.PI * elapsedSeconds) / 8) +
       noise;
@@ -172,6 +173,19 @@ const noiseOnlySamples = makeSamples({
 const noiseOnlySignal = estimatePpgHeartRate(noiseOnlySamples);
 assert.equal(noiseOnlySignal.bpm, null, 'Noise alone must not produce a pulse rate');
 console.log('Noise-only signal -> no pulse estimate');
+
+const darkSignal = estimatePpgHeartRate(
+  makeSamples({
+    durationSeconds: 16,
+    baseGreenMean: 1.5,
+    pulseAmplitude: 1.2,
+    noiseAmplitude: 0.04,
+    slowDriftAmplitude: 0.05,
+    seed: 72,
+  }),
+);
+assert.equal(darkSignal.bpm, null, 'Near-black camera frames must not produce a pulse rate');
+console.log('Near-black camera signal -> no pulse estimate');
 
 const noiseOnlyVariability = estimatePpgVariability(noiseOnlySamples);
 assert.equal(noiseOnlyVariability.sdnnMs, null, 'Noise alone must not produce variability metrics');
