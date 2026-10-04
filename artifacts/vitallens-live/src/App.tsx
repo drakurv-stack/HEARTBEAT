@@ -15,6 +15,7 @@ import {
   type OpticalPulseEstimate,
   type OpticalPulseSample,
 } from '@/lib/hrv-signal.mjs';
+import { computeHRV, type HrvMetrics } from '@/lib/hrv-compute.mjs';
 import { MeasurementReportProvider, useMeasurementReport } from '@/lib/measurement-report-context';
 import NotFound from '@/pages/not-found';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
@@ -22,6 +23,70 @@ import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter
 const queryClient = new QueryClient();
 type Phase = 'idle' | 'camera' | 'starting' | 'no-face' | 'calibrating' | 'live' | 'stopping' | 'denied' | 'error';
 type DisplayMetricValue = NonNullable<LiveInferenceUpdate['heartRate']> | null;
+type HrvMetricKey =
+  | 'sdnn' | 'rmssd' | 'sdsd' | 'pnn50' | 'pnn20' | 'meanIBI'
+  | 'sd1' | 'sd2' | 'sd1sd2'
+  | 'vlf' | 'lf' | 'hf' | 'tp' | 'lfhf' | 'lfNu' | 'hfNu';
+type HrvReading = { metrics: HrvMetrics; durationSeconds: number };
+
+const HRV_GROUPS: Array<{
+  title: string;
+  metrics: Array<{ label: string; key: HrvMetricKey; unit: string }>;
+}> = [
+  {
+    title: 'Time domain',
+    metrics: [
+      { label: 'SDNN', key: 'sdnn', unit: 'ms' },
+      { label: 'RMSSD', key: 'rmssd', unit: 'ms' },
+      { label: 'SDSD', key: 'sdsd', unit: 'ms' },
+      { label: 'pNN50', key: 'pnn50', unit: '%' },
+      { label: 'pNN20', key: 'pnn20', unit: '%' },
+      { label: 'Mean IBI', key: 'meanIBI', unit: 'ms' },
+    ],
+  },
+  {
+    title: 'Poincare',
+    metrics: [
+      { label: 'SD1', key: 'sd1', unit: 'ms' },
+      { label: 'SD2', key: 'sd2', unit: 'ms' },
+      { label: 'SD1/SD2', key: 'sd1sd2', unit: 'ratio' },
+    ],
+  },
+  {
+    title: 'Frequency domain',
+    metrics: [
+      { label: 'VLF', key: 'vlf', unit: 'ms²' },
+      { label: 'LF', key: 'lf', unit: 'ms²' },
+      { label: 'HF', key: 'hf', unit: 'ms²' },
+      { label: 'Total power', key: 'tp', unit: 'ms²' },
+      { label: 'LF/HF', key: 'lfhf', unit: 'ratio' },
+      { label: 'LF (n.u.)', key: 'lfNu', unit: '%' },
+      { label: 'HF (n.u.)', key: 'hfNu', unit: '%' },
+    ],
+  },
+];
+
+function HrvMetricCard({ label, value, unit }: {
+  label: string;
+  value: number | null | undefined;
+  unit: string;
+}) {
+  const formattedValue = typeof value === 'number' && Number.isFinite(value)
+    ? value.toFixed(1)
+    : null;
+  return (
+    <article
+      className={`hrv-metric-card ${formattedValue === null ? '' : 'hrv-metric-active'}`}
+      data-testid={`metric-hrv-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+    >
+      <span className="hrv-metric-label">{label}</span>
+      <span className="hrv-metric-value">
+        {formattedValue ?? <span className="metric-dash">--</span>}
+        {formattedValue !== null && <small>{unit}</small>}
+      </span>
+    </article>
+  );
+}
 
 function Metric({ label, symbol, metric, precision = 0, emptyLabel = 'WAITING', sourceLabel }: {
   label: string;
@@ -90,6 +155,7 @@ function AppHome() {
   const pulseSamplesRef = useRef<OpticalPulseSample[]>([]);
   const localPulseEstimateRef = useRef<OpticalPulseEstimate | null>(null);
   const [localPulseEstimate, setLocalPulseEstimate] = useState<OpticalPulseEstimate | null>(null);
+  const [liveHrv, setLiveHrv] = useState<HrvReading | null>(null);
   const pushFrameRef = useRef(pushFrame.mutateAsync);
   pushFrameRef.current = pushFrame.mutateAsync;
   const stopMutateRef = useRef(stopSession.mutate);
@@ -146,6 +212,7 @@ function AppHome() {
     setInference(null);
     setLocalPulseEstimate(null);
     localPulseEstimateRef.current = null;
+    setLiveHrv(null);
     pulseSamplesRef.current = [];
     faceDetectedRef.current = false;
     localReportReadingsRef.current = [];
@@ -205,6 +272,7 @@ function AppHome() {
             pulseSamplesRef.current = [];
             setLocalPulseEstimate(null);
             localPulseEstimateRef.current = null;
+            setLiveHrv(null);
             setInference(null);
             setPhase('no-face');
           } else {
@@ -217,6 +285,7 @@ function AppHome() {
           setErrorText(error instanceof Error ? error.message : 'A live frame could not be analyzed.');
           setLocalPulseEstimate(null);
           localPulseEstimateRef.current = null;
+          setLiveHrv(null);
           pulseSamplesRef.current = [];
           setPhase('error');
           stopCamera();
@@ -283,9 +352,32 @@ function AppHome() {
 
       if (timestampMs - lastAnalysisAt < 1000) return;
       lastAnalysisAt = timestampMs;
-      const estimate = estimateCameraHrv(pulseSamplesRef.current);
+      const samples = pulseSamplesRef.current;
+      const estimate = estimateCameraHrv(samples);
       setLocalPulseEstimate(estimate);
       localPulseEstimateRef.current = estimate;
+      const signal = samples.map((sample) => sample.green);
+      const timestamps = samples.map((sample) => sample.timestampMs / 1000);
+      const durationSeconds = timestamps.length > 1
+        ? Math.max(0, timestamps[timestamps.length - 1] - timestamps[0])
+        : 0;
+      const hasContinuousFreshSignal =
+        timestamps.length > 1 &&
+        timestampMs - samples[samples.length - 1].timestampMs <= 500 &&
+        timestamps.every((time, index) =>
+          Number.isFinite(time) &&
+          (index === 0 || (time > timestamps[index - 1] && time - timestamps[index - 1] <= 0.45)),
+        );
+      let metrics: HrvMetrics;
+      try {
+        metrics = computeHRV(signal, timestamps);
+      } catch {
+        metrics = { ok: false, nBeats: 0 };
+      }
+      setLiveHrv({
+        metrics: hasContinuousFreshSignal ? metrics : { ...metrics, ok: false },
+        durationSeconds,
+      });
       if (estimate) {
         setPhase('live');
         if (timestampMs - lastLocalReportCaptureRef.current >= 1000) {
@@ -321,6 +413,7 @@ function AppHome() {
     setInference(null);
     setLocalPulseEstimate(null);
     localPulseEstimateRef.current = null;
+    setLiveHrv(null);
     clearReport();
     setElapsed(0);
     setPhase('camera');
@@ -373,8 +466,12 @@ function AppHome() {
   const visibleInference = phase === 'no-face' || !inference?.faceDetected ? null : inference;
   const emptyMetricLabel = phase === 'no-face' ? 'NO FACE' : 'WAITING';
   const visibleHeartRate = visibleInference?.heartRate ?? localPulseEstimate?.heartRate ?? null;
-  const visibleSdnn = visibleInference?.hrvSdnn ?? localPulseEstimate?.hrvSdnn ?? null;
-  const visibleRmssd = visibleInference?.hrvRmssd ?? localPulseEstimate?.hrvRmssd ?? null;
+  const liveHrvReady = Boolean(
+    liveHrv &&
+    liveHrv.durationSeconds >= 30 &&
+    liveHrv.metrics.ok,
+  );
+  const liveHrvDuration = Math.min(60, Math.floor(liveHrv?.durationSeconds ?? 0));
 
   return (
     <main className="page-shell grain min-h-[100dvh]">
@@ -471,10 +568,46 @@ function AppHome() {
           <div className="metric-grid">
             <Metric label="Heart rate" symbol="HR" metric={visibleHeartRate} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.heartRate ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
             <Metric label="Respiratory rate" symbol="RR" metric={visibleInference?.respiratoryRate ?? null} emptyLabel={emptyMetricLabel} />
-            <Metric label="HRV · SDNN" symbol="SDNN" metric={visibleSdnn} precision={1} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.hrvSdnn ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
-            <Metric label="HRV · RMSSD" symbol="RMSSD" metric={visibleRmssd} precision={1} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.hrvRmssd ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
           </div>
-          <div className="metric-note" role="note"><Info size={13} /><span>VitalLens HRV is preferred when returned. Local fallback values use camera-based optical pulse intervals—not ECG—and require at least 30 seconds of clean signal.</span></div>
+          <section className="hrv-readout" aria-labelledby="hrv-readout-title" data-testid="section-camera-hrv">
+            <div className="hrv-readout-header">
+              <div>
+                <span className="hrv-readout-kicker">CAMERA PULSE VARIABILITY</span>
+                <h2 id="hrv-readout-title">HRV metrics</h2>
+              </div>
+              <span className={`hrv-readout-status ${liveHrvReady ? 'hrv-readout-ready' : ''}`}>
+                {liveHrvReady ? 'ESTIMATE READY' : 'MEASURING'}
+              </span>
+            </div>
+            {!liveHrvReady ? (
+              <div className="hrv-measuring" role="status" data-testid="status-hrv-measuring">
+                <LoaderCircle size={14} className={isRunning ? 'spin' : ''} />
+                <span>Measuring... {liveHrvDuration}s</span>
+              </div>
+            ) : (
+              <div className="hrv-groups">
+                {HRV_GROUPS.map((group) => (
+                  <section className="hrv-group" key={group.title} aria-label={group.title}>
+                    <h3>{group.title}</h3>
+                    <div className="hrv-metric-grid">
+                      {group.metrics.map((metric) => (
+                        <HrvMetricCard
+                          key={metric.key}
+                          label={metric.label}
+                          value={liveHrv?.metrics[metric.key]}
+                          unit={metric.unit}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+            <div className="metric-note" role="note">
+              <Info size={13} />
+              <span>These are camera-based estimates for wellness only, not medical measurements.</span>
+            </div>
+          </section>
           <StressCheck
             current={isRunning && phase === 'live' ? visibleInference : null}
             localEstimate={localPulseEstimate}
