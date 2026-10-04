@@ -21,6 +21,9 @@ export interface MeasurementReportReading {
   respiratoryRate: MeasurementMetricValue | null;
   hrvSdnn: MeasurementMetricValue | null;
   hrvRmssd: MeasurementMetricValue | null;
+  cameraPulseHeartRate?: MeasurementMetricValue | null;
+  cameraPulseHrvSdnn?: MeasurementMetricValue | null;
+  cameraPulseHrvRmssd?: MeasurementMetricValue | null;
 }
 
 interface CreateMeasurementReportOptions {
@@ -38,6 +41,19 @@ const METRIC_DETAILS: Record<
   respiratoryRate: { label: 'Respiratory rate', unit: 'breaths/min' },
   hrvSdnn: { label: 'HRV · SDNN', unit: 'ms' },
   hrvRmssd: { label: 'HRV · RMSSD', unit: 'ms' },
+};
+
+type CameraPulseMetricKey =
+  | 'cameraPulseHeartRate'
+  | 'cameraPulseHrvSdnn'
+  | 'cameraPulseHrvRmssd';
+
+const CAMERA_PULSE_FALLBACK: Partial<
+  Record<MeasurementMetricKey, CameraPulseMetricKey>
+> = {
+  heartRate: 'cameraPulseHeartRate',
+  hrvSdnn: 'cameraPulseHrvSdnn',
+  hrvRmssd: 'cameraPulseHrvRmssd',
 };
 
 function median(values: readonly number[]): number | null {
@@ -140,7 +156,7 @@ export function createMeasurementReport({
 
   const metrics = keys
     .map((key): MeasurementReportMetric | null => {
-      const samples = readings.flatMap((reading) => {
+      const vitallensSamples = readings.flatMap((reading) => {
         const metric = reading[key];
         if (
           !metric ||
@@ -157,8 +173,33 @@ export function createMeasurementReport({
           value: metric.value,
           confidence: metric.confidence,
           unit: metric.unit,
+          source: 'vitallens' as const,
         }];
       });
+      const localKey = CAMERA_PULSE_FALLBACK[key];
+      const cameraPulseSamples = localKey
+        ? readings.flatMap((reading) => {
+            const metric = reading[localKey];
+            if (
+              !metric ||
+              metric.value === null ||
+              !Number.isFinite(metric.value) ||
+              metric.value < 0 ||
+              !Number.isFinite(metric.confidence) ||
+              metric.confidence === null ||
+              toPercent(metric.confidence) < 65
+            ) return [];
+            return [{
+              value: metric.value,
+              confidence: metric.confidence,
+              unit: metric.unit,
+              source: 'camera-pulse' as const,
+            }];
+          })
+        : [];
+      const samples = vitallensSamples.length
+        ? vitallensSamples
+        : cameraPulseSamples;
       if (samples.length === 0) {
         return null;
       }
@@ -171,6 +212,7 @@ export function createMeasurementReport({
       );
       return {
         key,
+        source: samples[0].source,
         label: METRIC_DETAILS[key].label,
         unit: samples.find((sample) => sample.unit?.trim())?.unit ?? METRIC_DETAILS[key].unit,
         value: median(values),
@@ -182,8 +224,7 @@ export function createMeasurementReport({
     })
     .filter((metric): metric is MeasurementReportMetric => metric !== null);
 
-  const heartRateTrend = downsampleTrend(
-    readings.flatMap((reading) => {
+  const vitallensHeartRateTrend = readings.flatMap((reading) => {
       const heartRate = reading.heartRate;
       return heartRate?.value !== null &&
         heartRate?.value !== undefined &&
@@ -191,16 +232,38 @@ export function createMeasurementReport({
         heartRate.value > 0
         ? [{ elapsedSeconds: reading.elapsedSeconds, value: heartRate.value }]
         : [];
-    }),
+    });
+  const cameraPulseHeartRateTrend = readings.flatMap((reading) => {
+    const heartRate = reading.cameraPulseHeartRate;
+    return heartRate?.value !== null &&
+      heartRate?.value !== undefined &&
+      Number.isFinite(heartRate.value) &&
+      heartRate.value > 0 &&
+      Number.isFinite(heartRate.confidence) &&
+      heartRate.confidence !== null &&
+      toPercent(heartRate.confidence) >= 65
+      ? [{ elapsedSeconds: reading.elapsedSeconds, value: heartRate.value }]
+      : [];
+  });
+  const heartRateTrendSource = vitallensHeartRateTrend.length
+    ? 'vitallens'
+    : cameraPulseHeartRateTrend.length
+      ? 'camera-pulse'
+      : null;
+  const heartRateTrend = downsampleTrend(
+    heartRateTrendSource === 'vitallens'
+      ? vitallensHeartRateTrend
+      : cameraPulseHeartRateTrend,
   );
 
   return {
-    source: 'vitallens',
+    source: 'face-camera',
     completedAt,
     durationSeconds: Math.max(0, durationSeconds),
     sampleCount: Math.max(0, Math.round(sampleCount)),
     summary: createSummary(durationSeconds, metrics),
     metrics,
     heartRateTrend,
+    heartRateTrendSource,
   };
 }

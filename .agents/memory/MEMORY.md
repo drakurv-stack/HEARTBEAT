@@ -1,3 +1,3 @@
 - [Python toolchain selection](python-toolchain-selection.md) — confirm the interpreter chosen by `uv` before changing Python modules; module selection can point installs at a different runtime.
-- [VitalLens report evidence](vitallens-report-evidence.md) — include only measured, modality-specific values; PPG interval variability requires quality gates and must not be presented as ECG data.
+- [VitalLens report evidence](vitallens-report-evidence.md) — preserve source and quality gates; local camera HRV is optical pulse-interval data, never ECG data or a derivation from average vitals.
 - [Fingertip PPG scope](fingertip-ppg-source.md) — the standalone web fingertip PPG feature is intentionally removed; don't re-add without an explicit request.

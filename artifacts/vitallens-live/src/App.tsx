@@ -9,19 +9,27 @@ import { StressCheck } from '@/components/stress-check';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { createMeasurementReport, type MeasurementReportReading } from '@/lib/measurement-report-data';
+import {
+  estimateCameraHrv,
+  extractSkinRgb,
+  type OpticalPulseEstimate,
+  type OpticalPulseSample,
+} from '@/lib/hrv-signal.mjs';
 import { MeasurementReportProvider, useMeasurementReport } from '@/lib/measurement-report-context';
 import NotFound from '@/pages/not-found';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 
 const queryClient = new QueryClient();
 type Phase = 'idle' | 'camera' | 'starting' | 'no-face' | 'calibrating' | 'live' | 'stopping' | 'denied' | 'error';
+type DisplayMetricValue = NonNullable<LiveInferenceUpdate['heartRate']> | null;
 
-function Metric({ label, symbol, metric, precision = 0, emptyLabel = 'WAITING' }: {
+function Metric({ label, symbol, metric, precision = 0, emptyLabel = 'WAITING', sourceLabel }: {
   label: string;
   symbol: string;
-  metric: LiveInferenceUpdate[keyof Pick<LiveInferenceUpdate, 'heartRate' | 'respiratoryRate' | 'hrvSdnn' | 'hrvRmssd'>];
+  metric: DisplayMetricValue;
   precision?: number;
   emptyLabel?: string;
+  sourceLabel?: string;
 }) {
   const isAvailable = Boolean(metric);
   const confidence = metric ? (metric.confidence <= 1 ? metric.confidence * 100 : metric.confidence) : 0;
@@ -35,12 +43,12 @@ function Metric({ label, symbol, metric, precision = 0, emptyLabel = 'WAITING' }
         {metric ? metric.value.toFixed(precision) : <span className="metric-dash">—</span>}
         {metric && <small>{metric.unit}</small>}
       </div>
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">{label}{isAvailable && sourceLabel && <span className="metric-source">{sourceLabel}</span>}</div>
     </article>
   );
 }
 
-function SignalTrace({ active }: { active: boolean }) {
+function SignalTrace({ active, windowReady }: { active: boolean; windowReady: boolean }) {
   return (
     <div className={`signal-trace ${active ? 'trace-active' : ''}`} aria-hidden="true">
       <div className="trace-caption"><span>LIVE SIGNAL</span><span>PPG / RGB</span></div>
@@ -48,7 +56,7 @@ function SignalTrace({ active }: { active: boolean }) {
         <path className="trace-grid" d="M0 28H480M0 8H480M0 48H480" />
         <path className="trace-path" d="M0 30 C12 30 13 28 19 30 S31 33 38 29 S48 23 55 30 S67 34 76 30 S88 28 95 30 S108 31 114 30 S120 28 125 30 L132 30 L138 21 L144 40 L151 9 L158 48 L165 28 L172 30 C184 30 189 27 197 30 S210 34 218 29 S232 25 240 30 S252 32 260 29 S275 27 282 30 S296 34 304 29 S318 24 326 30 S339 31 348 30 S360 27 368 30 L376 30 L382 22 L388 39 L395 10 L402 47 L408 29 L418 30 C429 30 435 27 443 30 S456 33 464 29 S474 28 480 30" />
       </svg>
-      <div className="trace-foot"><span>FRAME WINDOW</span><span>{active ? 'ACQUIRING' : 'NO STREAM'}</span></div>
+      <div className="trace-foot"><span>LOCAL RGB WINDOW</span><span>{!active ? 'NO STREAM' : windowReady ? 'CLEAN WINDOW' : 'COLLECTING'}</span></div>
     </div>
   );
 }
@@ -69,12 +77,19 @@ function AppHome() {
   const [showPrivacy, setShowPrivacy] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const signalCanvasRef = useRef<HTMLCanvasElement>(null);
   const sessionIdRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const startedAtRef = useRef(0);
   const frameBusyRef = useRef(false);
   const reportReadingsRef = useRef<MeasurementReportReading[]>([]);
+  const localReportReadingsRef = useRef<Array<{ elapsedSeconds: number; estimate: OpticalPulseEstimate }>>([]);
   const lastReportSequenceRef = useRef(0);
+  const lastLocalReportCaptureRef = useRef(0);
+  const faceDetectedRef = useRef(false);
+  const pulseSamplesRef = useRef<OpticalPulseSample[]>([]);
+  const localPulseEstimateRef = useRef<OpticalPulseEstimate | null>(null);
+  const [localPulseEstimate, setLocalPulseEstimate] = useState<OpticalPulseEstimate | null>(null);
   const pushFrameRef = useRef(pushFrame.mutateAsync);
   pushFrameRef.current = pushFrame.mutateAsync;
   const stopMutateRef = useRef(stopSession.mutate);
@@ -111,12 +126,29 @@ function AppHome() {
     const durationSeconds = reportStartedAt > 0
       ? (performance.now() - reportStartedAt) / 1000
       : elapsed;
+    const localReadings: MeasurementReportReading[] = localReportReadingsRef.current.map(
+      ({ elapsedSeconds, estimate }) => ({
+        elapsedSeconds,
+        heartRate: null,
+        respiratoryRate: null,
+        hrvSdnn: null,
+        hrvRmssd: null,
+        cameraPulseHeartRate: estimate.heartRate,
+        cameraPulseHrvSdnn: estimate.hrvSdnn,
+        cameraPulseHrvRmssd: estimate.hrvRmssd,
+      }),
+    );
     setReport(createMeasurementReport({
       durationSeconds,
-      sampleCount: reportReadingsRef.current.length,
-      readings: reportReadingsRef.current,
+      sampleCount: Math.max(reportReadingsRef.current.length, localReadings.length),
+      readings: [...reportReadingsRef.current, ...localReadings],
     }));
     setInference(null);
+    setLocalPulseEstimate(null);
+    localPulseEstimateRef.current = null;
+    pulseSamplesRef.current = [];
+    faceDetectedRef.current = false;
+    localReportReadingsRef.current = [];
     setPhase('idle');
     startedAtRef.current = 0;
     setLocation('/report');
@@ -146,6 +178,7 @@ function AppHome() {
           data: { jpegBase64, timestamp: (performance.now() - startedAtRef.current) / 1000 },
         });
         if (!cancelled) {
+          faceDetectedRef.current = result.faceDetected;
           if (
             result.faceDetected &&
             result.resultSequence > 0 &&
@@ -169,16 +202,22 @@ function AppHome() {
             lastReportSequenceRef.current = result.resultSequence;
           }
           if (!result.faceDetected) {
+            pulseSamplesRef.current = [];
+            setLocalPulseEstimate(null);
+            localPulseEstimateRef.current = null;
             setInference(null);
             setPhase('no-face');
           } else {
             setInference(result);
-            setPhase(result.heartRate || result.respiratoryRate ? 'live' : 'calibrating');
+            setPhase(result.heartRate || result.respiratoryRate || localPulseEstimateRef.current ? 'live' : 'calibrating');
           }
         }
       } catch (error) {
         if (!cancelled) {
           setErrorText(error instanceof Error ? error.message : 'A live frame could not be analyzed.');
+          setLocalPulseEstimate(null);
+          localPulseEstimateRef.current = null;
+          pulseSamplesRef.current = [];
           setPhase('error');
           stopCamera();
           const failedSession = sessionIdRef.current;
@@ -199,6 +238,75 @@ function AppHome() {
   }, [sessionId, stream, phase, stopCamera]);
 
   useEffect(() => {
+    if (!sessionId || !stream) return;
+    let cancelled = false;
+    let lastAnalysisAt = 0;
+    const timer = window.setInterval(() => {
+      const video = videoRef.current;
+      const canvas = signalCanvasRef.current;
+      if (
+        cancelled ||
+        !faceDetectedRef.current ||
+        !video ||
+        !canvas ||
+        video.readyState < 2 ||
+        !video.videoWidth ||
+        !video.videoHeight
+      ) return;
+
+      const timestampMs = performance.now();
+      const width = 160;
+      const height = Math.max(80, Math.round((video.videoHeight / video.videoWidth) * width));
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return;
+
+      try {
+        context.drawImage(video, 0, 0, width, height);
+        const pixels = context.getImageData(0, 0, width, height);
+        const sample = extractSkinRgb(pixels.data, width, height, timestampMs);
+        if (sample) {
+          pulseSamplesRef.current.push(sample);
+          const oldestAllowed = timestampMs - 60_000;
+          while (
+            pulseSamplesRef.current.length > 0 &&
+            pulseSamplesRef.current[0].timestampMs < oldestAllowed
+          ) pulseSamplesRef.current.shift();
+        }
+      } catch {
+        pulseSamplesRef.current = [];
+        setLocalPulseEstimate(null);
+        localPulseEstimateRef.current = null;
+        return;
+      }
+
+      if (timestampMs - lastAnalysisAt < 1000) return;
+      lastAnalysisAt = timestampMs;
+      const estimate = estimateCameraHrv(pulseSamplesRef.current);
+      setLocalPulseEstimate(estimate);
+      localPulseEstimateRef.current = estimate;
+      if (estimate) {
+        setPhase('live');
+        if (timestampMs - lastLocalReportCaptureRef.current >= 1000) {
+          localReportReadingsRef.current.push({
+            elapsedSeconds: Math.max(0, (timestampMs - startedAtRef.current) / 1000),
+            estimate,
+          });
+          if (localReportReadingsRef.current.length > 1800) {
+            localReportReadingsRef.current.shift();
+          }
+          lastLocalReportCaptureRef.current = timestampMs;
+        }
+      }
+    }, 125);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [sessionId, stream]);
+
+  useEffect(() => {
     if (!sessionId) return;
     const timer = window.setInterval(() => setElapsed(Math.floor((performance.now() - startedAtRef.current) / 1000)), 1000);
     return () => window.clearInterval(timer);
@@ -211,11 +319,17 @@ function AppHome() {
   const begin = async () => {
     setErrorText('');
     setInference(null);
+    setLocalPulseEstimate(null);
+    localPulseEstimateRef.current = null;
     clearReport();
     setElapsed(0);
     setPhase('camera');
     reportReadingsRef.current = [];
+    localReportReadingsRef.current = [];
+    pulseSamplesRef.current = [];
+    faceDetectedRef.current = false;
     lastReportSequenceRef.current = 0;
+    lastLocalReportCaptureRef.current = 0;
     let cameraStream: MediaStream;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access is unavailable here. Open this page in a secure browser context.');
@@ -258,6 +372,9 @@ function AppHome() {
   const elapsedLabel = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
   const visibleInference = phase === 'no-face' || !inference?.faceDetected ? null : inference;
   const emptyMetricLabel = phase === 'no-face' ? 'NO FACE' : 'WAITING';
+  const visibleHeartRate = visibleInference?.heartRate ?? localPulseEstimate?.heartRate ?? null;
+  const visibleSdnn = visibleInference?.hrvSdnn ?? localPulseEstimate?.hrvSdnn ?? null;
+  const visibleRmssd = visibleInference?.hrvRmssd ?? localPulseEstimate?.hrvRmssd ?? null;
 
   return (
     <main className="page-shell grain min-h-[100dvh]">
@@ -279,7 +396,7 @@ function AppHome() {
         <div className="intro-row">
           <h1>See your signal<span className="title-period">.</span></h1>
           <div className="intro-copy">
-            <p>A small, direct test of camera-based vital estimates. No account, no saved video — just your browser, this server, and the VitalLens API.</p>
+            <p>A small, direct test of camera-based vital estimates. Compressed frames go to VitalLens; a short camera-colour window is analyzed locally in this tab.</p>
             <div className="wellness-note"><Info size={14} />For wellness exploration only. Not a medical device or diagnosis.</div>
           </div>
         </div>
@@ -291,6 +408,7 @@ function AppHome() {
           <div className={`camera-window ${isRunning ? 'camera-on' : ''}`} data-testid="status-camera-window">
             <video ref={videoRef} className={`camera-video ${stream ? 'visible' : ''}`} muted playsInline aria-label="Your live camera preview" />
             <canvas ref={canvasRef} className="capture-canvas" />
+            <canvas ref={signalCanvasRef} className="capture-canvas" aria-hidden="true" />
             {!stream && <div className="camera-placeholder">
               <div className="lens-mark"><span /><span /><span /><Aperture size={34} strokeWidth={1.1} /></div>
               <div className="placeholder-title">{phase === 'denied' ? 'Camera permission needed' : phase === 'error' ? 'Stream paused' : 'Your camera stays yours'}</div>
@@ -305,7 +423,7 @@ function AppHome() {
                   {phase === 'no-face' ? <><EyeOff size={15} /> Center your face inside the guide</> : phase === 'starting' ? <><LoaderCircle size={15} className="spin" /> Connecting to VitalLens</> : <><span className="signal-pulse"><Radio size={14} /></span> Hold still while the signal settles</>}
                 </div>
               )}
-              <div className="camera-overlay-bottom"><span>CAMERA · FULL FRAME</span><span><span className="cam-led" /> STREAMING TO SERVER</span></div>
+              <div className="camera-overlay-bottom"><span>LOCAL RGB WINDOW</span><span><span className="cam-led" /> FRAMES TO SERVER</span></div>
             </>}
             {phase === 'stopping' && <div className="camera-stopping"><LoaderCircle className="spin" size={20} /> Releasing camera session…</div>}
           </div>
@@ -334,13 +452,14 @@ function AppHome() {
 
           <div className="transmission-note">
             <div className="transmission-icon"><ShieldCheck size={17} /></div>
-            <div><strong>Before you start</strong><p>With your consent, temporary JPEG frames travel from this browser to our server and the VitalLens API for analysis. Video is not retained. The API key never leaves the server.</p></div>
+            <div><strong>Before you start</strong><p>With your consent, temporary JPEG frames travel to our server for VitalLens analysis. In parallel, this tab keeps a rolling window of cheek-colour averages for optical pulse estimates. Neither video nor colour samples are saved; the API key stays on the server.</p></div>
             <button className="detail-toggle" type="button" aria-label="Toggle privacy details" onClick={() => setShowPrivacy((value) => !value)} data-testid="button-privacy-details"><ChevronRight size={17} /></button>
           </div>
           {showPrivacy && <div className="privacy-detail enter">
             <div><span>01</span><p><strong>You choose when.</strong> Camera access is requested only after you press Start. Stop ends the camera stream and asks the server to release the session.</p></div>
-            <div><span>02</span><p><strong>Frames are transient.</strong> The browser sends compressed still frames while the session is active. No video recording is created or retained by this demo.</p></div>
-            <div><span>03</span><p><strong>Credentials stay server-side.</strong> The browser talks to this application server; it never receives the VitalLens API key.</p></div>
+            <div><span>02</span><p><strong>Local analysis stays in this tab.</strong> A 60-second rolling window of colour averages is used for optical pulse intervals; those samples are not sent to the API or saved.</p></div>
+            <div><span>03</span><p><strong>Frames are transient.</strong> Compressed still frames are sent only while the session is active. No video recording is created or retained by this demo.</p></div>
+            <div><span>04</span><p><strong>Credentials stay server-side.</strong> The browser talks to this application server; it never receives the VitalLens API key.</p></div>
           </div>}
         </div>
 
@@ -350,19 +469,20 @@ function AppHome() {
             <div className={`readout-status ${phase === 'no-face' ? 'readout-warning' : isRunning ? 'readout-on' : ''}`}><span />{phase === 'no-face' ? 'NO FACE' : phase === 'live' ? 'READING' : isRunning ? 'WARMING UP' : 'IDLE'}</div>
           </div>
           <div className="metric-grid">
-            <Metric label="Heart rate" symbol="HR" metric={visibleInference?.heartRate ?? null} emptyLabel={emptyMetricLabel} />
+            <Metric label="Heart rate" symbol="HR" metric={visibleHeartRate} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.heartRate ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
             <Metric label="Respiratory rate" symbol="RR" metric={visibleInference?.respiratoryRate ?? null} emptyLabel={emptyMetricLabel} />
-            <Metric label="HRV · SDNN" symbol="SDNN" metric={visibleInference?.hrvSdnn ?? null} precision={1} emptyLabel={emptyMetricLabel} />
-            <Metric label="HRV · RMSSD" symbol="RMSSD" metric={visibleInference?.hrvRmssd ?? null} precision={1} emptyLabel={emptyMetricLabel} />
+            <Metric label="HRV · SDNN" symbol="SDNN" metric={visibleSdnn} precision={1} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.hrvSdnn ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
+            <Metric label="HRV · RMSSD" symbol="RMSSD" metric={visibleRmssd} precision={1} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.hrvRmssd ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
           </div>
-          <div className="metric-note" role="note"><Info size={13} /><span>HRV (SDNN and RMSSD) measures beat-to-beat timing variation, needs at least 20 seconds of clean signal, and may require a VitalLens plan that supports HRV.</span></div>
+          <div className="metric-note" role="note"><Info size={13} /><span>VitalLens HRV is preferred when returned. Local fallback values use camera-based optical pulse intervals—not ECG—and require at least 30 seconds of clean signal.</span></div>
           <StressCheck
             current={isRunning && phase === 'live' ? visibleInference : null}
+            localEstimate={localPulseEstimate}
             sessionActive={isRunning}
             noFace={phase === 'no-face'}
             sessionId={sessionId}
           />
-          <SignalTrace active={isRunning && phase === 'live'} />
+          <SignalTrace active={isRunning} windowReady={Boolean(localPulseEstimate)} />
 
           <div className={`guidance-panel ${phase === 'no-face' ? 'guidance-warn' : phase === 'live' ? 'guidance-live' : ''}`}>
             <div className="guidance-icon">

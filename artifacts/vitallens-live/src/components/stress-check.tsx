@@ -1,17 +1,21 @@
 import { useState } from 'react';
 import { HeartPulse, Info, Moon, RotateCcw } from 'lucide-react';
 import type { LiveInferenceUpdate } from '@workspace/api-client-react';
+import type { OpticalPulseEstimate } from '@/lib/hrv-signal.mjs';
 
 type StressReading = {
   heartRate: number;
+  heartRateSource: 'vitallens' | 'camera-pulse';
   hrvSdnn: number;
   hrvRmssd: number;
+  hrvSource: 'vitallens' | 'camera-pulse';
   resultSequence: number;
   sessionId: string;
 };
 
 type StressCheckProps = {
   current: LiveInferenceUpdate | null;
+  localEstimate: OpticalPulseEstimate | null;
   sessionActive: boolean;
   noFace: boolean;
   sessionId: string | null;
@@ -21,32 +25,55 @@ function confidencePercent(confidence: number): number {
   return confidence <= 1 ? confidence * 100 : confidence;
 }
 
-function reliableReading(current: LiveInferenceUpdate | null): Omit<StressReading, 'sessionId'> | null {
-  const heartRate = current?.heartRate;
-  const sdnn = current?.hrvSdnn;
-  const rmssd = current?.hrvRmssd;
-  if (!current?.faceDetected || !heartRate || !sdnn || !rmssd) return null;
+function validMetric(
+  metric: { value: number; confidence: number } | null | undefined,
+  minimumConfidence: number,
+): metric is { value: number; confidence: number } {
+  return Boolean(
+    metric &&
+    Number.isFinite(metric.value) &&
+    metric.value > 0 &&
+    Number.isFinite(metric.confidence) &&
+    confidencePercent(metric.confidence) >= minimumConfidence,
+  );
+}
 
-  const signals = [heartRate, sdnn, rmssd];
-  if (signals.some((signal) =>
-    !Number.isFinite(signal.value) ||
-    signal.value <= 0 ||
-    !Number.isFinite(signal.confidence) ||
-    confidencePercent(signal.confidence) < 60
-  )) return null;
+function reliableReading(
+  current: LiveInferenceUpdate | null,
+  localEstimate: OpticalPulseEstimate | null,
+): Omit<StressReading, 'sessionId'> | null {
+  if (!current?.faceDetected) return null;
+
+  const apiHeartRate = validMetric(current.heartRate, 60) ? current.heartRate : null;
+  const localHeartRate = validMetric(localEstimate?.heartRate, 65)
+    ? localEstimate.heartRate
+    : null;
+  const apiHrv = validMetric(current.hrvSdnn, 60) && validMetric(current.hrvRmssd, 60)
+    ? { sdnn: current.hrvSdnn, rmssd: current.hrvRmssd, source: 'vitallens' as const }
+    : null;
+  const localHrv = validMetric(localEstimate?.hrvSdnn, 65) && validMetric(localEstimate?.hrvRmssd, 65)
+    ? { sdnn: localEstimate.hrvSdnn, rmssd: localEstimate.hrvRmssd, source: 'camera-pulse' as const }
+    : null;
+  const hrv = apiHrv ?? localHrv;
+  const heartRate = apiHeartRate ?? localHeartRate;
+  if (!hrv || !heartRate) return null;
 
   return {
     heartRate: heartRate.value,
-    hrvSdnn: sdnn.value,
-    hrvRmssd: rmssd.value,
-    resultSequence: current.resultSequence,
+    heartRateSource: apiHeartRate ? 'vitallens' : 'camera-pulse',
+    hrvSdnn: hrv.sdnn.value,
+    hrvRmssd: hrv.rmssd.value,
+    hrvSource: hrv.source,
+    resultSequence: hrv.source === 'camera-pulse'
+      ? localEstimate?.updatedAtMs ?? current.resultSequence
+      : current.resultSequence,
   };
 }
 
-export function StressCheck({ current, sessionActive, noFace, sessionId }: StressCheckProps) {
+export function StressCheck({ current, localEstimate, sessionActive, noFace, sessionId }: StressCheckProps) {
   const [sleepHours, setSleepHours] = useState('');
   const [baseline, setBaseline] = useState<StressReading | null>(null);
-  const reading = reliableReading(current);
+  const reading = reliableReading(current, localEstimate);
   const parsedSleepHours = sleepHours.trim() ? Number(sleepHours) : null;
   const validSleepHours = parsedSleepHours !== null &&
     Number.isFinite(parsedSleepHours) &&
@@ -65,8 +92,16 @@ export function StressCheck({ current, sessionActive, noFace, sessionId }: Stres
   const hasFreshComparison = Boolean(
     baseline &&
     reading &&
+    baseline.heartRateSource === reading.heartRateSource &&
+    baseline.hrvSource === reading.hrvSource &&
     reading.resultSequence > 0 &&
     (!sameSession || reading.resultSequence > baseline.resultSequence),
+  );
+  const waitingForSameSource = Boolean(
+    baseline &&
+    reading &&
+    (baseline.heartRateSource !== reading.heartRateSource ||
+      baseline.hrvSource !== reading.hrvSource),
   );
 
   let assessment: { level: 'very-high' | 'high' | 'change' | 'steady'; title: string; detail: string; changes: string } | null = null;
@@ -114,9 +149,13 @@ export function StressCheck({ current, sessionActive, noFace, sessionId }: Stres
         ? 'Start a live test to compare new readings with your calm baseline.'
         : 'Start a live test, sit calmly, and save a clear reading as your baseline.'
       : !current
-        ? 'Waiting for a clean HRV signal. HRV needs at least 20 seconds and may depend on your VitalLens plan.'
+        ? 'Waiting for a clean camera signal. Local optical pulse intervals need at least 30 seconds of usable samples.'
         : !reading
-          ? 'Signal confidence is too low for a comparison. Keep your face centered and hold still in steady light.'
+          ? localEstimate
+            ? 'Signal confidence is too low for a comparison. Keep your face centered and hold still in steady light.'
+            : 'Collecting a clean camera signal. Local optical pulse intervals need at least 30 seconds of usable samples.'
+          : waitingForSameSource
+            ? 'The available HRV source changed since your baseline. Save a new baseline from the current source before comparing.'
           : !baseline
             ? 'Sit calmly and still, then save this reading as your personal baseline.'
             : 'Waiting for a new HRV estimate after your baseline; the previous value is not reused.';
@@ -212,7 +251,7 @@ export function StressCheck({ current, sessionActive, noFace, sessionId }: Stres
 
       <p className="stress-disclaimer">
         <Info size={12} />
-        <span>Use calm, seated readings with the same device. “High” and “very high” use fixed changes from your baseline; exercise, movement, caffeine, illness, and other factors can change these signals. This is not a medical stress measurement.</span>
+        <span>Use calm, seated readings with the same device. Comparisons require matching signal sources; optical pulse intervals are not ECG. Fixed changes from baseline are not a medical stress measurement.</span>
       </p>
       <details className="stress-method-details">
         <summary>How this check compares readings</summary>

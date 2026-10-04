@@ -4,6 +4,7 @@ import './measurement-report.css';
 
 export type MeasurementReportMetric = {
   key: 'heartRate' | 'respiratoryRate' | 'hrvSdnn' | 'hrvRmssd';
+  source: 'vitallens' | 'camera-pulse';
   label: string;
   value: number | null;
   unit: string;
@@ -14,13 +15,14 @@ export type MeasurementReportMetric = {
 };
 
 export type MeasurementReportData = {
-  source: 'vitallens';
+  source: 'face-camera';
   completedAt: string;
   durationSeconds: number;
   sampleCount: number;
   summary: string;
   metrics: MeasurementReportMetric[];
   heartRateTrend: Array<{ elapsedSeconds: number; value: number }>;
+  heartRateTrendSource: 'vitallens' | 'camera-pulse' | null;
 };
 
 export type MeasurementReportProps = {
@@ -31,8 +33,8 @@ export type MeasurementReportProps = {
 const metricExplanations: Record<MeasurementReportMetric['key'], string> = {
   heartRate: 'An estimate of how many heartbeats occur in one minute, based on this session’s camera-derived signal.',
   respiratoryRate: 'An estimate of breaths per minute. This value is only shown when the session returned a reading.',
-  hrvSdnn: 'SDNN describes the spread of detected optical pulse-to-pulse intervals in this session.',
-  hrvRmssd: 'RMSSD describes short-term changes between successive optical pulse-to-pulse intervals in this session.',
+  hrvSdnn: 'SDNN describes the spread of optical pulse-to-pulse intervals in this session, not ECG R-R intervals.',
+  hrvRmssd: 'RMSSD describes changes between optical pulse-to-pulse intervals in this session, not ECG R-R intervals.',
 };
 
 const metricIcons = {
@@ -62,7 +64,10 @@ function formatValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function TrendChart({ data }: { data: MeasurementReportData['heartRateTrend'] }) {
+function TrendChart({ data, source }: {
+  data: MeasurementReportData['heartRateTrend'];
+  source: MeasurementReportData['heartRateTrendSource'];
+}) {
   const points = useMemo(() => data.filter((point) =>
     Number.isFinite(point.elapsedSeconds) && Number.isFinite(point.value),
   ), [data]);
@@ -94,7 +99,7 @@ function TrendChart({ data }: { data: MeasurementReportData['heartRateTrend'] })
   return (
     <figure className="vl-report-trend" data-testid="chart-heart-rate-trend">
       <div className="vl-report-trend-top">
-        <span>HEART RATE</span>
+          <span>HEART RATE · {source === 'camera-pulse' ? 'LOCAL OPTICAL' : 'VITALLENS'}</span>
         <span>{points.length} {points.length === 1 ? 'POINT' : 'POINTS'}</span>
       </div>
       <svg viewBox="0 0 600 104" preserveAspectRatio="none" role="img" aria-label={`Heart rate trend with ${points.length} measured ${points.length === 1 ? 'point' : 'points'}, ranging from ${formatValue(low)} to ${formatValue(high)} beats per minute.`}>
@@ -115,6 +120,9 @@ function TrendChart({ data }: { data: MeasurementReportData['heartRateTrend'] })
 
 function MetricCard({ metric }: { metric: MeasurementReportMetric }) {
   const Icon = metricIcons[metric.key];
+  const sourceLabel = metric.source === 'camera-pulse'
+    ? 'Local optical estimate'
+    : 'VitalLens';
   const hasRange = metric.min !== null && metric.max !== null;
   const hasConfidence = metric.confidencePercent !== null && Number.isFinite(metric.confidencePercent);
 
@@ -130,6 +138,7 @@ function MetricCard({ metric }: { metric: MeasurementReportMetric }) {
       </div>
       <p className="vl-report-metric-explanation">{metricExplanations[metric.key]}</p>
       <div className="vl-report-metric-meta">
+        <span data-testid={`report-source-${metric.key}`}>Source <strong>{sourceLabel}</strong></span>
         {hasRange && <span data-testid={`report-range-${metric.key}`}>Session range <strong>{formatValue(metric.min as number)}–{formatValue(metric.max as number)} {metric.unit}</strong></span>}
         {hasConfidence && <span data-testid={`report-confidence-${metric.key}`}>Confidence <strong>{formatValue(metric.confidencePercent as number)}%</strong></span>}
         <span data-testid={`report-reading-count-${metric.key}`}>{metric.readingCount} {metric.readingCount === 1 ? 'reading' : 'readings'}</span>
@@ -140,7 +149,7 @@ function MetricCard({ metric }: { metric: MeasurementReportMetric }) {
 
 export function MeasurementReport({ report, onClose }: MeasurementReportProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const sourceLabel = 'VitalLens face camera';
+  const sourceLabel = 'Face-camera measurement';
   const availableMetrics = report.metrics.filter((metric) =>
     metric.value !== null && Number.isFinite(metric.value),
   );
@@ -241,14 +250,14 @@ export function MeasurementReport({ report, onClose }: MeasurementReportProps) {
               <div><span className="vl-report-section-index">02</span><h2 id="vl-report-trend-title">Across this session</h2></div>
               <span className="vl-report-section-note">HEART RATE</span>
             </div>
-            <TrendChart data={report.heartRateTrend} />
+            <TrendChart data={report.heartRateTrend} source={report.heartRateTrendSource} />
           </section>
 
           <aside className="vl-report-notice" role="note" data-testid="report-wellness-notice">
             <span className="vl-report-notice-icon"><Info size={16} /></span>
             <div>
               <strong>Wellness exploration only</strong>
-              <p>These camera-derived readings are estimates for general wellness exploration. They are not a medical measurement, diagnosis, or substitute for professional care.</p>
+              <p>Local SDNN/RMSSD values use optical pulse-to-pulse intervals, not ECG R-R intervals. All readings are estimates for general wellness exploration, not medical measurements or diagnoses.</p>
             </div>
           </aside>
         </main>
