@@ -2,3 +2,4 @@
 - [VitalLens report evidence](vitallens-report-evidence.md) — preserve source and quality gates; local camera HRV is optical pulse-interval data, never ECG data or a derivation from average vitals.
 - [Fingertip PPG scope](fingertip-ppg-source.md) — the standalone web fingertip PPG feature is intentionally removed; don't re-add without an explicit request.
 - [Live camera vitals scope](live-camera-vitals-scope.md) — preserve the working heart-rate and respiratory-rate paths when extending the live camera demo.
+- [Respiratory-rate camera framing](respiratory-rate-framing.md) — VitalLens RR needs upper-chest visibility as well as the face; preserve high-quality camera frames.

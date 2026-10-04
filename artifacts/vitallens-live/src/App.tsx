@@ -252,14 +252,24 @@ function AppHome() {
       if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
       frameBusyRef.current = true;
       try {
-        const width = 480;
-        const height = Math.round((video.videoHeight / video.videoWidth) * width);
-        canvas.width = width;
-        canvas.height = height;
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Unable to prepare a camera frame.');
-        context.drawImage(video, 0, 0, width, height);
-        const jpegBase64 = canvas.toDataURL('image/jpeg', 0.56).split(',')[1];
+        const encodeFrame = (width: number, quality: number) => {
+          const height = Math.round((video.videoHeight / video.videoWidth) * width);
+          canvas.width = width;
+          canvas.height = height;
+          context.drawImage(video, 0, 0, width, height);
+          return canvas.toDataURL('image/jpeg', quality).split(',')[1] ?? '';
+        };
+        const width = Math.min(video.videoWidth, 640);
+        let jpegBase64 = '';
+        for (const quality of [0.84, 0.76, 0.68, 0.6]) {
+          jpegBase64 = encodeFrame(width, quality);
+          if (jpegBase64.length <= 150000) break;
+        }
+        if (jpegBase64.length > 150000) {
+          jpegBase64 = encodeFrame(Math.min(video.videoWidth, 480), 0.56);
+        }
         if (!jpegBase64 || jpegBase64.length > 150000) throw new Error('Frame could not be compressed for the live demo.');
         const result = await pushFrameRef.current({
           sessionId,
@@ -514,7 +524,7 @@ function AppHome() {
         <div className="intro-row">
           <h1>See your signal<span className="title-period">.</span></h1>
           <div className="intro-copy">
-            <p>A small, direct test of camera-based vital estimates. Compressed frames go to VitalLens; a short camera-colour window is analyzed locally in this tab.</p>
+            <p>A small, direct test of camera-based vital estimates. High-quality frames go to VitalLens; a short camera-colour window is analyzed locally in this tab.</p>
             <div className="wellness-note"><Info size={14} />For wellness exploration only. Not a medical device or diagnosis.</div>
           </div>
         </div>
@@ -530,15 +540,15 @@ function AppHome() {
             {!stream && <div className="camera-placeholder">
               <div className="lens-mark"><span /><span /><span /><Aperture size={34} strokeWidth={1.1} /></div>
               <div className="placeholder-title">{phase === 'denied' ? 'Camera permission needed' : phase === 'error' ? 'Stream paused' : 'Your camera stays yours'}</div>
-              <p>{phase === 'denied' ? 'Allow camera access in your browser, then return here.' : phase === 'error' ? 'Resolve the issue below and start a fresh session.' : 'Preview stays in this tab. Frames are only sent while you run the test.'}</p>
+              <p>{phase === 'denied' ? 'Allow camera access in your browser, then return here.' : phase === 'error' ? 'Resolve the issue below and start a fresh session.' : 'Frame your face and upper chest for respiratory rate. Frames are only sent while you run the test.'}</p>
               <div className="privacy-pills"><span><Eye size={13} />Local preview</span><span><LockKeyhole size={13} />No recording</span></div>
             </div>}
             {stream && <>
               <div className="camera-overlay-top"><span><span className="record-dot" /> CAMERA ACTIVE</span><span>LOCAL PREVIEW</span></div>
-              <div className="viewfinder"><i /><i /><i /><i /><div className="face-guide"><span /><span /></div></div>
-              {(phase === 'no-face' || phase === 'calibrating' || phase === 'starting') && (
+              <div className="viewfinder" aria-hidden="true"><i /><i /><i /><i /><div className="upper-body-guide"><span className="guide-head" /><span className="guide-torso" /></div></div>
+              {(phase === 'no-face' || phase === 'calibrating' || phase === 'starting' || phase === 'live') && (
                 <div className="camera-hint">
-                  {phase === 'no-face' ? <><EyeOff size={15} /> Center your face inside the guide</> : phase === 'starting' ? <><LoaderCircle size={15} className="spin" /> Connecting to VitalLens</> : <><span className="signal-pulse"><Radio size={14} /></span> Hold still while the signal settles</>}
+                  {phase === 'no-face' ? <><EyeOff size={15} /> Keep your face and upper chest in frame</> : phase === 'starting' ? <><LoaderCircle size={15} className="spin" /> Connecting to VitalLens</> : phase === 'live' ? <><span className="signal-pulse"><Radio size={14} /></span> Keep face and upper chest in frame for RR</> : <><span className="signal-pulse"><Radio size={14} /></span> Hold still; keep face and upper chest in frame</>}
                 </div>
               )}
               <div className="camera-overlay-bottom"><span>LOCAL RGB WINDOW</span><span><span className="cam-led" /> FRAMES TO SERVER</span></div>
@@ -644,7 +654,7 @@ function AppHome() {
             </div>
             <div className="guidance-copy">
               <span className="guidance-label">{phase === 'no-face' ? 'FACE NOT DETECTED' : phase === 'live' ? 'SIGNAL ACQUIRED' : phase === 'error' ? 'SESSION INTERRUPTED' : 'WHAT TO EXPECT'}</span>
-              <p>{phase === 'no-face' ? 'No face is tracked, so live values are hidden. Center your face inside the guide and face a steady light source.' : phase === 'live' ? 'Pulse estimates can take several seconds to update. Hold still in steady light; vigorous movement can make camera readings unreliable.' : phase === 'error' ? 'The stream stopped safely. Check your connection and start a new session when ready.' : 'Center your whole face inside the guide, use steady lighting, and hold still for a few seconds while the signal calibrates.'}</p>
+              <p>{phase === 'no-face' ? 'No face is tracked, so live values are hidden. Center your face in the guide, keep your upper chest visible, and use steady light.' : phase === 'live' ? 'For respiratory rate, keep your upper chest in frame as well as your face. Hold still in even lighting; vigorous movement can make camera readings unreliable.' : phase === 'error' ? 'The stream stopped safely. Check your connection and start a new session when ready.' : 'Frame your face and upper chest together, use even lighting, and hold still while the signal settles.'}</p>
             </div>
           </div>
 
