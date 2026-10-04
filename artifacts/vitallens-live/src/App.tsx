@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Activity, Aperture, ArrowUpRight, Check, ChevronRight, CircleAlert, CircleHelp, Clock3, Eye, EyeOff, Fingerprint, HeartPulse, Info, LoaderCircle, LockKeyhole, Radio, RefreshCw, ShieldCheck, Square, Video, Wifi } from 'lucide-react';
+import { Aperture, ArrowUpRight, Check, ChevronRight, CircleAlert, CircleHelp, Clock3, Eye, EyeOff, HeartPulse, Info, LoaderCircle, LockKeyhole, Radio, RefreshCw, ShieldCheck, Square, Video, Wifi } from 'lucide-react';
 import { useGetLiveDemoStatus, usePushLiveFrame, useStartLiveSession, useStopLiveSession } from '@workspace/api-client-react';
 import type { LiveInferenceUpdate } from '@workspace/api-client-react';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { FingertipPpgMode } from '@/components/fingertip-ppg-mode';
 import { MeasurementReport } from '@/components/measurement-report';
 import { StressCheck } from '@/components/stress-check';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { createMeasurementReport, type MeasurementReportReading } from '@/lib/measurement-report-data';
 import { MeasurementReportProvider, useMeasurementReport } from '@/lib/measurement-report-context';
-import { useFingertipPpg } from '@/hooks/use-fingertip-ppg';
 import NotFound from '@/pages/not-found';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 
@@ -114,7 +112,6 @@ function AppHome() {
       ? (performance.now() - reportStartedAt) / 1000
       : elapsed;
     setReport(createMeasurementReport({
-      source: 'vitallens',
       durationSeconds,
       sampleCount: reportReadingsRef.current.length,
       readings: reportReadingsRef.current,
@@ -271,9 +268,6 @@ function AppHome() {
         </a>
         <div className="topbar-right">
           <span className="demo-label"><span className="demo-dot" />BROWSER DEMO</span>
-          <Link className="ppg-nav-link" href="/ppg" data-testid="link-fingertip-ppg">
-            <Activity size={15} /> Fingertip PPG
-          </Link>
           <button className="about-link" type="button" onClick={() => setShowPrivacy((value) => !value)} data-testid="button-privacy">
             <CircleHelp size={16} /> How it works
           </button>
@@ -289,12 +283,6 @@ function AppHome() {
             <div className="wellness-note"><Info size={14} />For wellness exploration only. Not a medical device or diagnosis.</div>
           </div>
         </div>
-        <nav className="ppg-mode-switch home-mode-switch" aria-label="Camera modes">
-          <span className="ppg-mode-current" aria-current="page">Face camera <i>ACTIVE MODE</i></span>
-          <Link className="ppg-mode-link" href="/ppg" data-testid="link-mode-fingertip-ppg">
-            <Fingerprint size={15} /> Fingertip PPG
-          </Link>
-        </nav>
       </section>
 
       <section className="workbench enter-delay" aria-label="Live VitalLens demo">
@@ -408,29 +396,14 @@ function AppHome() {
   );
 }
 
-function FingertipPpgPage() {
-  const { report, ...ppgProps } = useFingertipPpg();
-  const { setReport } = useMeasurementReport();
-  const [, setLocation] = useLocation();
-
-  useEffect(() => {
-    if (!report) return;
-    setReport(report);
-    setLocation('/report');
-  }, [report, setLocation, setReport]);
-
-  return <FingertipPpgMode {...ppgProps} />;
-}
-
 function MeasurementReportPage() {
   const { report, clearReport } = useMeasurementReport();
   const [, setLocation] = useLocation();
 
   const continueToMeasurement = useCallback(() => {
-    const destination = report?.source === 'fingertip' ? '/ppg' : '/';
     clearReport();
-    setLocation(destination);
-  }, [clearReport, report, setLocation]);
+    setLocation('/');
+  }, [clearReport, setLocation]);
 
   if (!report) {
     return (
@@ -442,7 +415,6 @@ function MeasurementReportPage() {
           <p>Reports are available after a measurement and remain in this tab only.</p>
           <div className="vl-report-missing-links">
             <Link href="/">Start a face-camera session</Link>
-            <Link href="/ppg">Start a fingertip session</Link>
           </div>
         </div>
       </main>
@@ -457,7 +429,6 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={AppHome} />
-        <Route path="/ppg" component={FingertipPpgPage} />
         <Route path="/report" component={MeasurementReportPage} />
         <Route component={NotFound} />
       </Switch>

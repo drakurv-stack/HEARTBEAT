@@ -7,9 +7,7 @@ export type MeasurementMetricKey =
   | 'heartRate'
   | 'respiratoryRate'
   | 'hrvSdnn'
-  | 'hrvRmssd'
-  | 'hrvPnn50'
-  | 'meanPulseInterval';
+  | 'hrvRmssd';
 
 export interface MeasurementMetricValue {
   value: number | null;
@@ -19,22 +17,17 @@ export interface MeasurementMetricValue {
 
 export interface MeasurementReportReading {
   elapsedSeconds: number;
-  signalQualityPercent?: number | null;
   heartRate: MeasurementMetricValue | null;
   respiratoryRate: MeasurementMetricValue | null;
   hrvSdnn: MeasurementMetricValue | null;
   hrvRmssd: MeasurementMetricValue | null;
-  hrvPnn50?: MeasurementMetricValue | null;
-  meanPulseInterval?: MeasurementMetricValue | null;
 }
 
 interface CreateMeasurementReportOptions {
-  source: MeasurementReportData['source'];
   completedAt?: string;
   durationSeconds: number;
   sampleCount: number;
   readings: readonly MeasurementReportReading[];
-  signalQualityPercent?: number | null;
 }
 
 const METRIC_DETAILS: Record<
@@ -45,8 +38,6 @@ const METRIC_DETAILS: Record<
   respiratoryRate: { label: 'Respiratory rate', unit: 'breaths/min' },
   hrvSdnn: { label: 'HRV · SDNN', unit: 'ms' },
   hrvRmssd: { label: 'HRV · RMSSD', unit: 'ms' },
-  hrvPnn50: { label: 'HRV · pNN50', unit: '%' },
-  meanPulseInterval: { label: 'Mean pulse interval', unit: 'ms' },
 };
 
 function median(values: readonly number[]): number | null {
@@ -84,7 +75,6 @@ function formatDuration(seconds: number): string {
 }
 
 function createSummary(
-  source: MeasurementReportData['source'],
   durationSeconds: number,
   metrics: readonly MeasurementReportMetric[],
 ): string {
@@ -93,9 +83,8 @@ function createSummary(
   const details: string[] = [];
 
   if (!heartRate?.value || heartRate.readingCount === 0) {
-    const inputName = source === 'fingertip' ? 'fingertip camera signal' : 'face-camera session';
     details.push(
-      `The ${inputName} did not produce a reliable heart-rate estimate in ${duration}.`,
+      `The face-camera session did not produce a reliable heart-rate estimate in ${duration}.`,
     );
   } else {
     details.push(
@@ -112,8 +101,6 @@ function createSummary(
     'respiratoryRate',
     'hrvSdnn',
     'hrvRmssd',
-    'hrvPnn50',
-    'meanPulseInterval',
   ] as const) {
     const metric = metrics.find((item) => item.key === key);
     if (metric?.value !== null && metric?.value !== undefined) {
@@ -139,17 +126,17 @@ function downsampleTrend(
 }
 
 export function createMeasurementReport({
-  source,
   completedAt = new Date().toISOString(),
   durationSeconds,
   sampleCount,
   readings,
-  signalQualityPercent,
 }: CreateMeasurementReportOptions): MeasurementReportData {
-  const keys: MeasurementMetricKey[] =
-    source === 'fingertip'
-      ? ['heartRate', 'hrvSdnn', 'hrvRmssd', 'hrvPnn50', 'meanPulseInterval']
-      : ['heartRate', 'respiratoryRate', 'hrvSdnn', 'hrvRmssd'];
+  const keys: MeasurementMetricKey[] = [
+    'heartRate',
+    'respiratoryRate',
+    'hrvSdnn',
+    'hrvRmssd',
+  ];
 
   const metrics = keys
     .map((key): MeasurementReportMetric | null => {
@@ -162,8 +149,7 @@ export function createMeasurementReport({
           metric.value < 0 ||
           (metric.value === 0 &&
             key !== 'hrvSdnn' &&
-            key !== 'hrvRmssd' &&
-            key !== 'hrvPnn50')
+            key !== 'hrvRmssd')
         ) {
           return [];
         }
@@ -174,17 +160,7 @@ export function createMeasurementReport({
         }];
       });
       if (samples.length === 0) {
-        return source === 'fingertip'
-          ? {
-              key,
-              ...METRIC_DETAILS[key],
-              value: null,
-              confidencePercent: null,
-              min: null,
-              max: null,
-              readingCount: 0,
-            }
-          : null;
+        return null;
       }
 
       const values = samples.map((sample) => sample.value);
@@ -218,29 +194,12 @@ export function createMeasurementReport({
     }),
   );
 
-  const allConfidences = readings.flatMap((reading) =>
-    keys.flatMap((key) => {
-      const confidence = reading[key]?.confidence;
-      return confidence !== null && confidence !== undefined && Number.isFinite(confidence)
-        ? [toPercent(confidence)]
-        : [];
-    }),
-  );
-  const computedQuality = mean(allConfidences);
-  const quality =
-    signalQualityPercent !== null && signalQualityPercent !== undefined
-      ? Math.round(Math.max(0, Math.min(100, signalQualityPercent)))
-      : computedQuality === null
-        ? null
-        : Math.round(computedQuality);
-
   return {
-    source,
+    source: 'vitallens',
     completedAt,
     durationSeconds: Math.max(0, durationSeconds),
     sampleCount: Math.max(0, Math.round(sampleCount)),
-    summary: createSummary(source, durationSeconds, metrics),
-    signalQualityPercent: quality,
+    summary: createSummary(durationSeconds, metrics),
     metrics,
     heartRateTrend,
   };

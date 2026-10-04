@@ -1,3 +1,3 @@
 - [Python toolchain selection](python-toolchain-selection.md) — confirm the interpreter chosen by `uv` before changing Python modules; module selection can point installs at a different runtime.
 - [VitalLens report evidence](vitallens-report-evidence.md) — include only measured, modality-specific values; PPG interval variability requires quality gates and must not be presented as ECG data.
-- [Fingertip PPG source](fingertip-ppg-source.md) — the user identifies the uploaded PPGbetter Android app as the main reference for fingertip PPG and expects measured heart rate.
+- [Fingertip PPG scope](fingertip-ppg-source.md) — the standalone web fingertip PPG feature is intentionally removed; don't re-add without an explicit request.

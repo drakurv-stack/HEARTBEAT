@@ -64,11 +64,11 @@
 .vl-report-session-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 18px; }
 .vl-report-session-meta span { display: inline-flex; align-items: center; gap: 6px; color: #7a877d; font: 9px var(--app-font-mono, monospace); }
 .vl-report-session-meta svg { color: #91a091; }
-.vl-report-measurements, .vl-report-quality, .vl-report-trend-section { padding: 23px 7.1% 25px; border-bottom: 1px solid var(--report-line); }
-.vl-report-section-head, .vl-report-quality-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.vl-report-section-head > div, .vl-report-quality-heading > div { display: flex; min-width: 0; align-items: baseline; gap: 10px; }
+.vl-report-measurements, .vl-report-trend-section { padding: 23px 7.1% 25px; border-bottom: 1px solid var(--report-line); }
+.vl-report-section-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.vl-report-section-head > div { display: flex; min-width: 0; align-items: baseline; gap: 10px; }
 .vl-report-section-index { flex: 0 0 auto; color: var(--report-coral); font: 9px var(--app-font-mono, monospace); }
-.vl-report-section-head h2, .vl-report-quality-heading h2 { margin: 0; color: #3b5146; font: 600 17px/1.2 var(--app-font-serif, 'Manrope', sans-serif); letter-spacing: -.035em; }
+.vl-report-section-head h2 { margin: 0; color: #3b5146; font: 600 17px/1.2 var(--app-font-serif, 'Manrope', sans-serif); letter-spacing: -.035em; }
 .vl-report-section-note { flex: 0 0 auto; font-size: 8px; color: #9aa197; }
 .vl-report-metric-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
 .vl-report-metric { min-width: 0; padding: 15px 16px 13px; border: 1px solid #e5e6dc; border-radius: 6px; background: rgba(251,250,246,.72); }
@@ -84,11 +84,6 @@
 .vl-report-no-metrics { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 13px 14px; border: 1px solid #e6e3d8; border-radius: 5px; color: #78847b; background: #f8f7f1; }
 .vl-report-no-metrics svg { flex: 0 0 auto; margin-top: 1px; color: #9a876c; }
 .vl-report-no-metrics p { margin: 0; font-size: 11px; line-height: 1.55; }
-.vl-report-quality-heading > strong { color: #315646; font: 600 28px/1 var(--app-font-serif, 'Manrope', sans-serif); letter-spacing: -.05em; }
-.vl-report-quality-heading > strong small { margin-left: 3px; color: #78867b; font: 10px var(--app-font-mono, monospace); letter-spacing: 0; }
-.vl-report-quality-track { height: 5px; margin-top: 14px; overflow: hidden; border-radius: 6px; background: #e6e8df; }
-.vl-report-quality-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #a8b99a, #63816d); }
-.vl-report-quality > p { margin: 8px 0 0; color: #8a958b; font-size: 9px; line-height: 1.5; }
 .vl-report-trend { margin: 14px 0 0; padding: 11px 12px 9px; border: 1px solid #e6e5dc; border-radius: 5px; background: rgba(251,250,246,.7); }
 .vl-report-trend-top, .vl-report-trend figcaption { display: flex; justify-content: space-between; color: #90998f; font: 8px var(--app-font-mono, monospace); letter-spacing: .08em; }
 .vl-report-trend svg { display: block; width: 100%; height: 90px; margin: 8px 0 5px; overflow: visible; }
@@ -120,8 +115,8 @@
   .vl-report-summary { margin-top: 14px; font-size: 12px; }
   .vl-report-session-meta { gap: 9px 13px; margin-top: 15px; }
   .vl-report-session-meta span { font-size: 8px; }
-  .vl-report-measurements, .vl-report-quality, .vl-report-trend-section { padding: 20px 20px 21px; }
-  .vl-report-section-head h2, .vl-report-quality-heading h2 { font-size: 15px; }
+  .vl-report-measurements, .vl-report-trend-section { padding: 20px 20px 21px; }
+  .vl-report-section-head h2 { font-size: 15px; }
   .vl-report-section-note { font-size: 7px; letter-spacing: .08em; }
   .vl-report-metric-list { grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }
   .vl-report-metric { padding: 13px 14px 11px; }
@@ -133,7 +128,7 @@
   .vl-report-footer { min-height: 63px; padding: 0 18px; padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
 @media (max-width: 380px) {
-  .vl-report-overview, .vl-report-measurements, .vl-report-quality, .vl-report-trend-section { padding-right: 15px; padding-left: 15px; }
+  .vl-report-overview, .vl-report-measurements, .vl-report-trend-section { padding-right: 15px; padding-left: 15px; }
   .vl-report-notice { margin-right: 15px; margin-left: 15px; }
   .vl-report-session-meta { gap: 8px; }
   .vl-report-session-meta span { font-size: 7px; }

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { Activity, ArrowLeft, CalendarClock, Check, Clock3, Fingerprint, HeartPulse, Info, Wind, X } from 'lucide-react';
+import { Activity, ArrowLeft, CalendarClock, Check, Clock3, HeartPulse, Info, Wind, X } from 'lucide-react';
 import './measurement-report.css';
 
 export type MeasurementReportMetric = {
-  key: 'heartRate' | 'respiratoryRate' | 'hrvSdnn' | 'hrvRmssd' | 'hrvPnn50' | 'meanPulseInterval';
+  key: 'heartRate' | 'respiratoryRate' | 'hrvSdnn' | 'hrvRmssd';
   label: string;
   value: number | null;
   unit: string;
@@ -14,12 +14,11 @@ export type MeasurementReportMetric = {
 };
 
 export type MeasurementReportData = {
-  source: 'fingertip' | 'vitallens';
+  source: 'vitallens';
   completedAt: string;
   durationSeconds: number;
   sampleCount: number;
   summary: string;
-  signalQualityPercent: number | null;
   metrics: MeasurementReportMetric[];
   heartRateTrend: Array<{ elapsedSeconds: number; value: number }>;
 };
@@ -34,8 +33,6 @@ const metricExplanations: Record<MeasurementReportMetric['key'], string> = {
   respiratoryRate: 'An estimate of breaths per minute. This value is only shown when the session returned a reading.',
   hrvSdnn: 'SDNN describes the spread of detected optical pulse-to-pulse intervals in this session.',
   hrvRmssd: 'RMSSD describes short-term changes between successive optical pulse-to-pulse intervals in this session.',
-  hrvPnn50: 'pNN50 is the share of successive optical pulse intervals that differ by more than 50 ms.',
-  meanPulseInterval: 'The average time between detected optical pulses during this session.',
 };
 
 const metricIcons = {
@@ -43,8 +40,6 @@ const metricIcons = {
   respiratoryRate: Wind,
   hrvSdnn: Activity,
   hrvRmssd: Activity,
-  hrvPnn50: Activity,
-  meanPulseInterval: Activity,
 };
 
 function formatDuration(seconds: number): string {
@@ -145,14 +140,10 @@ function MetricCard({ metric }: { metric: MeasurementReportMetric }) {
 
 export function MeasurementReport({ report, onClose }: MeasurementReportProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const sourceLabel = report.source === 'fingertip' ? 'Fingertip PPG' : 'VitalLens face camera';
+  const sourceLabel = 'VitalLens face camera';
   const availableMetrics = report.metrics.filter((metric) =>
     metric.value !== null && Number.isFinite(metric.value),
   );
-  const quality = report.signalQualityPercent !== null && Number.isFinite(report.signalQualityPercent)
-    ? Math.min(100, Math.max(0, report.signalQualityPercent))
-    : null;
-
   useEffect(() => {
     closeButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -215,7 +206,7 @@ export function MeasurementReport({ report, onClose }: MeasurementReportProps) {
             <div className="vl-report-eyebrow"><span /> SESSION REPORT <span className="vl-report-session-number">01 / 01</span></div>
             <div className="vl-report-title-row">
               <div>
-                <div className="vl-report-source"><span>{report.source === 'fingertip' ? <Fingerprint size={14} /> : <Activity size={14} />}</span>{sourceLabel}</div>
+                <div className="vl-report-source"><span><Activity size={14} /></span>{sourceLabel}</div>
                 <h1 id="vl-report-title">Your session,<br /><em>measured.</em></h1>
               </div>
               <div className="vl-report-complete-mark" aria-hidden="true"><Check size={21} /></div>
@@ -245,28 +236,13 @@ export function MeasurementReport({ report, onClose }: MeasurementReportProps) {
             )}
           </section>
 
-          {report.source === 'fingertip' && quality !== null && (
-            <section className="vl-report-quality" aria-labelledby="vl-report-quality-title" data-testid="report-signal-quality">
-              <div className="vl-report-quality-heading">
-                <div><span className="vl-report-section-index">02</span><h2 id="vl-report-quality-title">Signal quality</h2></div>
-                <strong>{formatValue(quality)}<small>%</small></strong>
-              </div>
-              <div className="vl-report-quality-track" role="meter" aria-label="Signal quality" aria-valuemin={0} aria-valuemax={100} aria-valuenow={quality} data-testid="meter-signal-quality">
-                <span style={{ width: `${quality}%` }} />
-              </div>
-              <p>This is the signal-quality estimate supplied for this fingertip session. It describes the captured signal, not a health score.</p>
-            </section>
-          )}
-
-          {(report.source === 'vitallens' || report.source === 'fingertip') && (
-            <section className="vl-report-trend-section" aria-labelledby="vl-report-trend-title">
-              <div className="vl-report-section-head">
-                <div><span className="vl-report-section-index">{report.source === 'fingertip' && quality !== null ? '03' : '02'}</span><h2 id="vl-report-trend-title">Across this session</h2></div>
-                <span className="vl-report-section-note">HEART RATE</span>
-              </div>
-              <TrendChart data={report.heartRateTrend} />
-            </section>
-          )}
+          <section className="vl-report-trend-section" aria-labelledby="vl-report-trend-title">
+            <div className="vl-report-section-head">
+              <div><span className="vl-report-section-index">02</span><h2 id="vl-report-trend-title">Across this session</h2></div>
+              <span className="vl-report-section-note">HEART RATE</span>
+            </div>
+            <TrendChart data={report.heartRateTrend} />
+          </section>
 
           <aside className="vl-report-notice" role="note" data-testid="report-wellness-notice">
             <span className="vl-report-notice-icon"><Info size={16} /></span>
