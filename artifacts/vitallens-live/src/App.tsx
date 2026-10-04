@@ -9,6 +9,7 @@ import { StressCheck } from '@/components/stress-check';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { createMeasurementReport, type MeasurementReportReading } from '@/lib/measurement-report-data';
+import { getRespiratoryRateRejectionReason } from '@/lib/respiratory-rate-quality.mjs';
 import {
   estimateCameraHrv,
   extractSkinRgb,
@@ -88,27 +89,47 @@ function HrvMetricCard({ label, value, unit }: {
   );
 }
 
-function Metric({ label, symbol, metric, precision = 0, emptyLabel = 'WAITING', sourceLabel }: {
+function Metric({ label, symbol, metric, precision = 0, emptyLabel = 'WAITING', sourceLabel, qualityCheck }: {
   label: string;
   symbol: string;
   metric: DisplayMetricValue;
   precision?: number;
   emptyLabel?: string;
   sourceLabel?: string;
+  qualityCheck?: typeof getRespiratoryRateRejectionReason;
 }) {
-  const isAvailable = Boolean(metric);
+  const rejectionReason = metric && qualityCheck ? qualityCheck(metric) : null;
+  const isAvailable = Boolean(metric) && rejectionReason === null;
   const confidence = metric ? (metric.confidence <= 1 ? metric.confidence * 100 : metric.confidence) : 0;
+  const rejectionLabel = rejectionReason === 'low-confidence'
+    ? 'LOW'
+    : rejectionReason === 'out-of-range'
+      ? 'CHECK'
+      : rejectionReason === 'invalid'
+        ? 'UNRELIABLE'
+        : null;
   return (
     <article className={`metric-card ${isAvailable ? 'metric-active' : ''}`} data-testid={`metric-${label.toLowerCase().replace(/\s+/g, '-')}`}>
       <div className="metric-top">
         <span className="metric-symbol">{symbol}</span>
-        {isAvailable ? <span className="metric-confidence"><span />{Math.round(confidence)}% signal</span> : <span className="metric-awaiting">{emptyLabel}</span>}
+        {metric
+          ? <span className={`metric-confidence ${rejectionReason ? 'metric-confidence-low' : ''}`}><span />{Math.round(confidence)}% signal{rejectionLabel ? ` · ${rejectionLabel}` : ''}</span>
+          : <span className="metric-awaiting">{emptyLabel}</span>}
       </div>
       <div className="metric-value">
-        {metric ? metric.value.toFixed(precision) : <span className="metric-dash">—</span>}
-        {metric && <small>{metric.unit}</small>}
+        {isAvailable && metric ? metric.value.toFixed(precision) : <span className="metric-dash">—</span>}
+        {isAvailable && metric && <small>{metric.unit}</small>}
       </div>
       <div className="metric-label">{label}{isAvailable && sourceLabel && <span className="metric-source">{sourceLabel}</span>}</div>
+      {rejectionReason && (
+        <p className="metric-quality-note">
+          {rejectionReason === 'low-confidence'
+            ? 'Low signal; RR hidden. Hold still in steady light.'
+            : rejectionReason === 'out-of-range'
+              ? 'Outside display range; RR hidden.'
+              : 'Unreliable estimate hidden.'}
+        </p>
+      )}
     </article>
   );
 }
@@ -567,7 +588,7 @@ function AppHome() {
           </div>
           <div className="metric-grid">
             <Metric label="Heart rate" symbol="HR" metric={visibleHeartRate} emptyLabel={emptyMetricLabel} sourceLabel={visibleInference?.heartRate ? 'VITALLENS' : localPulseEstimate ? 'LOCAL OPTICAL' : undefined} />
-            <Metric label="Respiratory rate" symbol="RR" metric={visibleInference?.respiratoryRate ?? null} emptyLabel={emptyMetricLabel} />
+            <Metric label="Respiratory rate" symbol="RR" metric={visibleInference?.respiratoryRate ?? null} emptyLabel={emptyMetricLabel} qualityCheck={getRespiratoryRateRejectionReason} />
           </div>
           <section className="hrv-readout" aria-labelledby="hrv-readout-title" data-testid="section-camera-hrv">
             <div className="hrv-readout-header">

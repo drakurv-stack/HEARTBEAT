@@ -2,6 +2,7 @@ import type {
   MeasurementReportData,
   MeasurementReportMetric,
 } from '../components/measurement-report';
+import { getRespiratoryRateRejectionReason } from './respiratory-rate-quality.mjs';
 
 export type MeasurementMetricKey =
   | 'heartRate'
@@ -165,7 +166,9 @@ export function createMeasurementReport({
           metric.value < 0 ||
           (metric.value === 0 &&
             key !== 'hrvSdnn' &&
-            key !== 'hrvRmssd')
+            key !== 'hrvRmssd') ||
+          (key === 'respiratoryRate' &&
+            getRespiratoryRateRejectionReason(metric) !== null)
         ) {
           return [];
         }

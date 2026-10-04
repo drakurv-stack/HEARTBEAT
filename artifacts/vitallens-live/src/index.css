@@ -355,12 +355,15 @@
 .metric-symbol { color:#89948b; font:10px var(--app-font-mono); letter-spacing:.04em; }
 .metric-confidence { display:flex; align-items:center; gap:5px; color:#64816c; font:9px var(--app-font-mono); }
 .metric-confidence span { width:5px; height:5px; background:#84a57f; border-radius:50%; }
+.metric-confidence-low { color:#a7634c; }
+.metric-confidence-low span { background:#c77d61; }
 .metric-awaiting { color:#b0b2a7; font:8px var(--app-font-mono); letter-spacing:.1em; }
 .metric-value { display:flex; align-items:baseline; gap:6px; margin-top:11px; color:#2f4a3f; font:600 clamp(26px,3vw,35px)/.95 var(--app-font-serif); letter-spacing:-.06em; font-variant-numeric:tabular-nums; }
 .metric-value small { color:#7c8980; font:10px var(--app-font-mono); letter-spacing:0; }
 .metric-dash { color:#c2c3b8; font-weight:400; }
 .metric-label { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:7px; color:#808a81; font-size:10px; }
 .metric-source { color:#7b917d; font:8px var(--app-font-mono); letter-spacing:.06em; white-space:nowrap; }
+.metric-quality-note { margin:5px 0 0; color:#a7634c; font-size:8px; line-height:1.35; }
 .signal-trace { margin-top:13px; padding:9px 10px 7px; border:1px solid #e9e5db; border-radius:6px; background:#f8f7f1; }
 .trace-caption,.trace-foot { display:flex; justify-content:space-between; color:#a0a69c; font:8px var(--app-font-mono); letter-spacing:.09em; }
 .signal-trace svg { display:block; width:100%; height:42px; margin:4px 0; overflow:visible; }
