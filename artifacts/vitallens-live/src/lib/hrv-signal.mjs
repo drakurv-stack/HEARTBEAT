@@ -1,4 +1,6 @@
-const MIN_CAPTURE_SECONDS = 30;
+import { computeHRV } from './hrv-compute.mjs';
+
+const MIN_CAPTURE_SECONDS = 45;
 const MAX_CAPTURE_SECONDS = 60;
 
 function median(values) {
@@ -283,11 +285,11 @@ export function estimateCameraHrv(inputSamples) {
   if (yDeviation < 0.00001) return null;
   const alpha = standardDeviation(x) / yDeviation;
   const waveform = x.map((value, index) => value - alpha * y[index]);
-  const result = computeHrvFromWaveform(
+  const result = computeHRV(
     waveform,
     samples.map((sample) => sample.timestampMs / 1000),
   );
-  if (!result) return null;
+  if (!result.ok) return null;
 
   return {
     heartRate: {
@@ -307,6 +309,8 @@ export function estimateCameraHrv(inputSamples) {
     },
     updatedAtMs: latest,
     sampleDurationSeconds: durationSeconds,
-    beatCount: result.beatCount,
+    beatCount: result.nBeats,
+    metrics: result,
+    source: 'camera-colour',
   };
 }

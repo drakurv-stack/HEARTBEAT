@@ -1,6 +1,14 @@
 export interface HrvMetrics {
   ok: boolean;
   nBeats: number;
+  confidence?: number;
+  rejectedBeatCount?: number;
+  totalBeatIntervals?: number;
+  rejectedBeatFraction?: number;
+  signalDurationSeconds?: number;
+  sampleRate?: number;
+  hasGap?: boolean;
+  rawIntervals?: Array<{ value: number; valid: boolean }>;
   meanHR?: number;
   meanIBI?: number;
   sdnn?: number | null;

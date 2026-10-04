@@ -187,7 +187,41 @@ components:
           oneOf:
             - $ref: "#/components/schemas/VitalMetric"
             - type: "null"
-      required: [resultSequence, faceDetected, heartRate, respiratoryRate, hrvSdnn, hrvRmssd]
+        ppgWaveform:
+          oneOf:
+            - $ref: "#/components/schemas/PpgWaveform"
+            - type: "null"
+        requestsRemaining:
+          oneOf:
+            - type: integer
+              minimum: 0
+            - type: "null"
+        apiError:
+          oneOf:
+            - type: string
+            - type: "null"
+      required: [resultSequence, faceDetected, heartRate, respiratoryRate, hrvSdnn, hrvRmssd, ppgWaveform, requestsRemaining, apiError]
+    PpgWaveform:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: number
+        confidence:
+          oneOf:
+            - type: array
+              items:
+                type: number
+            - type: "null"
+        timestamps:
+          type: array
+          items:
+            type: number
+        sampleRate:
+          type: number
+          exclusiveMinimum: 0
+      required: [data, timestamps, sampleRate]
     ErrorResponse:
       type: object
       properties:

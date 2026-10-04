@@ -1,3 +1,5 @@
+import type { HrvMetrics } from './hrv-compute.mjs';
+
 export type OpticalMetric = {
   value: number;
   confidence: number;
@@ -19,6 +21,8 @@ export type OpticalPulseEstimate = {
   updatedAtMs: number;
   sampleDurationSeconds: number;
   beatCount: number;
+  metrics: HrvMetrics;
+  source: 'camera-colour';
 };
 
 export function extractSkinRgb(
