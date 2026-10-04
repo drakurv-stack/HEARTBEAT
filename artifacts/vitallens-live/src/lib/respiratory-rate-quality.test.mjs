@@ -11,17 +11,17 @@ test('withholds low-confidence respiratory estimates and reports the reason', ()
   assert.equal(isUsableRespiratoryRate(estimate), false);
 });
 
-test('accepts estimates at the confidence threshold in fraction or percent form', () => {
+test('accepts estimates at 40% confidence in fraction or percent form', () => {
   assert.equal(
-    isUsableRespiratoryRate({ value: 18, confidence: 0.65 }),
+    isUsableRespiratoryRate({ value: 18, confidence: 0.4 }),
     true,
   );
   assert.equal(
-    isUsableRespiratoryRate({ value: 18, confidence: 65 }),
+    isUsableRespiratoryRate({ value: 18, confidence: 40 }),
     true,
   );
   assert.equal(
-    isUsableRespiratoryRate({ value: 18, confidence: 0.64 }),
+    isUsableRespiratoryRate({ value: 18, confidence: 0.39 }),
     false,
   );
 });
