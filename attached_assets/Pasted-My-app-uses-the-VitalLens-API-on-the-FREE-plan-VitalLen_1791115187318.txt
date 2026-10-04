@@ -1,0 +1,38 @@
+My app uses the VitalLens API on the FREE plan (VitalLens 1.1). It gives me heart rate, respiratory rate and ppg_waveform, but NOT HRV metrics, which are paid-only. I compute HRV myself in hrv.js (computeHRV). Right now it uses a noisy cheek-colour signal, so the numbers are wrong (e.g. HR 40 bpm vs mean IBI 896 ms which is about 67 bpm, RMSSD bigger than SDNN, pNN50 82%). Fix the accuracy. Do NOT break existing features. First tell me what you find, then implement.
+
+STEP 1 - Inspect
+Read how I call VitalLens and what the response contains. Confirm the ppg_waveform array and its timestamps/sample rate are returned, and the per-vital confidence values. Tell me which files and fields you found.
+
+STEP 2 - Use the VitalLens ppg_waveform for HRV
+- Stop computing HRV from the cheek-colour averages. Collect the ppg_waveform from VitalLens responses, stitch successive chunks together in time order without duplicating or gapping samples, and keep a rolling 60 s buffer with correct timestamps.
+- Use the cheek-colour signal only as a fallback when no waveform is available, and mark HRV "low confidence" in that case.
+- HR, RR and HRV must come from the same 60 s window so they agree.
+
+STEP 3 - Improve hrv.js
+- Resample the waveform to a uniform rate, then upsample to about 250 Hz with cubic/spline interpolation BEFORE peak detection, and refine each peak time with parabolic interpolation. Low frame rates otherwise inflate RMSSD.
+- Band-pass 0.7-3.0 Hz with a zero-phase (forward-backward) Butterworth filter instead of the moving-average approximation.
+- Reject intervals outside 400-1500 ms and any interval more than 20% from the rolling median of 5 beats. Compute RMSSD and pNN50/pNN20 ONLY from adjacent valid intervals; never treat the neighbours of a dropped beat as adjacent.
+- Need at least 30 clean beats and at least 45 s of signal. Report the fraction of rejected beats.
+- Frequency domain: interpolate the IBI series to 4 Hz, apply a Hann window, then integrate LF (0.04-0.15 Hz) and HF (0.15-0.4 Hz). Hide VLF unless the window is at least 5 minutes.
+
+STEP 4 - Quality gating (very important)
+- Discard the first 5-8 s after the camera starts.
+- Show HRV only if VitalLens confidence for HR is above 70% AND the clean beat count is sufficient. Otherwise show "--" with a reason ("Hold still", "Improve lighting", "Face not detected").
+- Plausibility limits: HR 40-180 bpm, RR 6-30, SDNN 5-250 ms, RMSSD 5-250 ms. Outside these, show "--".
+- Cross-check: if VitalLens HR and my own peak-detected HR differ by more than 5 bpm, show a "low confidence" warning on HRV.
+- If RR confidence is below 50%, show "--" instead of the number.
+
+STEP 5 - Stability
+- Show each metric as the median of the last 5 estimates, updated at most once per second.
+- Label HRV clearly as an estimate ("camera estimate, wellness only"). Keep the existing disclaimer.
+
+STEP 6 - Capture quality and free-plan limits
+- Send frames at a steady ~30 fps with accurate timestamps, good resolution, light compression.
+- Add a pre-check screen (face centred and large enough, even front lighting, little motion) and run a fixed 60 s countdown measurement.
+- The free plan only allows 100 requests per month and 2 requests per second. Batch the video into the longest chunks the API accepts instead of sending many small requests, and show the user how many requests are left if the API reports it. Handle rate-limit and quota errors gracefully with a clear message.
+
+STEP 7 - Debug and test
+- Add ?debug=1 showing: sample rate, beat count, rejected beats, mean IBI vs VitalLens HR, and the raw IBI list.
+- Add a test that feeds a synthetic 60 s waveform with known intervals into computeHRV and checks SDNN and RMSSD are within 10% of the true values.
+
+Report which files you changed and what the VitalLens response contained.

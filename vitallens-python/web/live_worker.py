@@ -28,6 +28,9 @@ def empty_update(result_sequence=0):
         "respiratoryRate": None,
         "hrvSdnn": None,
         "hrvRmssd": None,
+        "ppgWaveform": None,
+        "requestsRemaining": None,
+        "apiError": None,
     }
 
 
@@ -73,12 +76,44 @@ def make_update(result):
         face_detected = False
 
     vitals = result.get("vitals", {})
+    waveform = result.get("waveforms", {}).get("ppg_waveform")
+    waveform_update = None
+    if isinstance(waveform, dict):
+        data = np.asarray(waveform.get("data", [])).reshape(-1)
+        timestamps = np.asarray(result.get("time", [])).reshape(-1)
+        confidence_values = waveform.get("confidence")
+        confidence = (
+            np.asarray(confidence_values).reshape(-1)
+            if confidence_values is not None
+            else None
+        )
+        fps = scalar(result.get("fps"))
+        if (
+            data.size > 1
+            and timestamps.size == data.size
+            and fps is not None
+            and fps > 0
+        ):
+            valid = np.isfinite(data) & np.isfinite(timestamps)
+            waveform_update = {
+                "data": data[valid].astype(float).tolist(),
+                "timestamps": timestamps[valid].astype(float).tolist(),
+                "sampleRate": fps,
+                "confidence": (
+                    confidence[valid].astype(float).tolist()
+                    if confidence is not None and confidence.size == data.size
+                    else None
+                ),
+            }
     return {
         "faceDetected": bool(face_detected),
         "heartRate": metric(vitals, "heart_rate"),
         "respiratoryRate": metric(vitals, "respiratory_rate"),
         "hrvSdnn": metric(vitals, "hrv_sdnn"),
         "hrvRmssd": metric(vitals, "hrv_rmssd"),
+        "ppgWaveform": waveform_update,
+        "requestsRemaining": None,
+        "apiError": None,
     }
 
 
@@ -90,7 +125,43 @@ def main():
 
     try:
         client = VitalLens(method="vitallens", api_key=api_key)
-        client.rppg.fps_target = 8.0
+        client.rppg.fps_target = 30.0
+        api_state = {"error": None, "requestsRemaining": None}
+
+        def observe_api_response(response, **_kwargs):
+            remaining = None
+            for header, value in response.headers.items():
+                normalized = header.lower().replace("_", "-")
+                if "remaining" not in normalized:
+                    continue
+                if not any(token in normalized for token in ("request", "quota", "rate")):
+                    continue
+                try:
+                    candidate = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if candidate >= 0:
+                    remaining = candidate
+                    break
+
+            api_state["requestsRemaining"] = remaining
+            if response.status_code == 429:
+                api_state["error"] = (
+                    "VitalLens rate limit or monthly quota reached. "
+                    "Wait before retrying or check your VitalLens plan."
+                )
+            elif response.status_code >= 400:
+                api_state["error"] = (
+                    "VitalLens could not process this measurement. "
+                    "Check the API key, request limit, and connection."
+                )
+            else:
+                api_state["error"] = None
+            return response
+
+        client.rppg.http_session.hooks.setdefault("response", []).append(
+            observe_api_response
+        )
         session = None
         result_sequence = 0
 
@@ -99,6 +170,8 @@ def main():
             if not results:
                 return
             update = make_update(results[0])
+            update["requestsRemaining"] = api_state["requestsRemaining"]
+            update["apiError"] = api_state["error"]
             with UPDATE_LOCK:
                 if session is None or session.current_face is None or not update["faceDetected"]:
                     update = empty_update(result_sequence)
@@ -182,6 +255,8 @@ def main():
                 else:
                     update = empty_update(result_sequence)
                     latest_update.update(update)
+                update["requestsRemaining"] = api_state["requestsRemaining"]
+                update["apiError"] = api_state["error"]
             update["faceDetected"] = face_detected
             emit({"type": "frame", "requestId": request_id, "update": update})
     finally:
