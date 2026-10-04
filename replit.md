@@ -11,6 +11,8 @@ A browser camera demo for the imported VitalLens Python library. It sends compre
 - `pnpm run typecheck` — typecheck workspace libraries and artifacts.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec.
 - Required Replit Secret: `VITALLENS_API_KEY` — a VitalLens API key. Keep it in Replit Secrets; do not place it in source code.
+- Without the API key, the page and backend run, but server-backed live analysis is unavailable. After adding or updating the key, restart the API Server workflow.
+- Check `/api/healthz` for server health and `/api/live/status` for live-analysis readiness.
 
 ## Stack
 
